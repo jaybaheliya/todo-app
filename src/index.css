@@ -55,3 +55,96 @@ body {
     @apply outline-none;
   }
 }
+
+/* ── Animated mesh background ── */
+.bg-mesh {
+  background-color: #f0ebff;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(167,139,250,0.45) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 90%, rgba(244,114,182,0.35) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 40% at 60% 40%, rgba(99,102,241,0.25) 0%, transparent 50%);
+  animation: meshShift 12s ease-in-out infinite alternate;
+}
+.dark .bg-mesh {
+  background-color: #07050f;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 15% 10%, rgba(109,40,217,0.5) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 85% 85%, rgba(79,70,229,0.4) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 40% at 55% 45%, rgba(139,92,246,0.3) 0%, transparent 50%);
+  animation: meshShift 12s ease-in-out infinite alternate;
+}
+@keyframes meshShift {
+  0%   { background-position: 0% 0%, 100% 100%, 50% 50%; }
+  100% { background-position: 5% 8%, 95% 92%, 55% 45%; }
+}
+
+/* ── Floating orbs ── */
+.orb {
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(72px);
+  pointer-events: none;
+  z-index: 0;
+  animation: orbFloat 18s ease-in-out infinite alternate;
+}
+.orb-1 {
+  width: 420px; height: 420px;
+  top: -120px; left: -100px;
+  background: rgba(167,139,250,0.3);
+  animation-duration: 20s;
+}
+.orb-2 {
+  width: 320px; height: 320px;
+  bottom: -80px; right: -80px;
+  background: rgba(244,114,182,0.25);
+  animation-duration: 15s;
+  animation-direction: alternate-reverse;
+}
+.orb-3 {
+  width: 200px; height: 200px;
+  top: 40%; left: 60%;
+  background: rgba(99,102,241,0.2);
+  animation-duration: 25s;
+}
+.dark .orb-1 { background: rgba(109,40,217,0.4); }
+.dark .orb-2 { background: rgba(79,70,229,0.35); }
+.dark .orb-3 { background: rgba(139,92,246,0.25); }
+@keyframes orbFloat {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(30px, 20px) scale(1.05); }
+  100% { transform: translate(-20px, 40px) scale(0.95); }
+}
+
+/* ── Glass card ── */
+.glass {
+  background: rgba(255,255,255,0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 8px 32px rgba(109,40,217,0.08), 0 1px 0 rgba(255,255,255,0.6) inset;
+}
+.dark .glass {
+  background: rgba(15,10,30,0.6);
+  border: 1px solid rgba(139,92,246,0.2);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 1px 0 rgba(139,92,246,0.15) inset;
+}
+
+/* ── Progress bar shimmer ── */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.progress-shimmer {
+  background: linear-gradient(90deg, #a78bfa 0%, #c084fc 40%, #f472b6 60%, #a78bfa 100%);
+  background-size: 200% auto;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* ── Todo row entrance ── */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.todo-row {
+  animation: slideIn 0.25s ease-out both;
+}
