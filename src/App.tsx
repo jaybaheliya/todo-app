@@ -26,19 +26,11 @@ interface Toast {
 
 /* ── Auth gate ── */
 function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
-  const [email, setEmail] = useState("");
-  const [sent, setSent]   = useState(false);
+  const [email, setEmail]     = useState("");
+  const [sent, setSent]       = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState("");
 
-  const send = async () => {
-    if (!email.trim()) return;
-    setLoading(true);
-    await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
-    setSent(true);
-    setLoading(false);
-  };
-
-  // listen for magic-link redirect
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session?.user) onLogin(data.session.user);
@@ -48,6 +40,17 @@ function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
     });
     return () => subscription.unsubscribe();
   }, [onLogin]);
+
+  const send = async () => {
+    if (!email.trim()) return;
+    setLoading(true); setError("");
+    const { error: err } = await supabase.auth.signInWithOtp({
+      email, options: { emailRedirectTo: window.location.href },
+    });
+    if (err) setError(err.message);
+    else setSent(true);
+    setLoading(false);
+  };
 
   return (
     <section className="bg-mesh min-h-lvh flex items-center justify-center">
@@ -64,13 +67,12 @@ function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
           <>
             <p className="text-sm text-gray-500 dark:text-gray-400">Sign in to sync your tasks across all devices.</p>
             <input
-              type="email"
-              placeholder="your@email.com"
-              value={email}
+              type="email" placeholder="your@email.com" value={email}
               onChange={e => setEmail(e.target.value)}
               onKeyDown={e => e.key === "Enter" && send()}
               className="w-full px-4 py-3 rounded-xl border border-violet-200 dark:border-violet-700 bg-transparent text-gray-900 dark:text-white text-sm"
             />
+            {error && <p className="text-xs text-red-500">{error}</p>}
             <button
               onClick={send}
               disabled={loading || !email.trim()}

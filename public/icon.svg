@@ -1,12 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#7c3aed"/>
-      <stop offset="100%" stop-color="#d946ef"/>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6d28d9"/>
+      <stop offset="50%" stop-color="#a21caf"/>
+      <stop offset="100%" stop-color="#ec4899"/>
     </linearGradient>
+    <linearGradient id="shine" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="page" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ede9fe" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="120" fill="url(#g)"/>
-  <path d="M160 256l64 64 128-128" stroke="white" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="368" cy="144" r="28" fill="white" opacity="0.9"/>
-  <path d="M356 132l8 8 16-16" stroke="#7c3aed" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="100" fill="url(#shine)"/>
+
+  <!-- Book -->
+  <g filter="url(#shadow)">
+    <rect x="118" y="108" width="240" height="296" rx="12" fill="#c4b5fd" opacity="0.6"/>
+    <rect x="118" y="108" width="36" height="296" rx="12" fill="#7c3aed"/>
+    <rect x="142" y="108" width="216" height="296" rx="10" fill="url(#page)"/>
+    <rect x="142" y="108" width="16" height="296" fill="#a78bfa" opacity="0.5"/>
+  </g>
+
+  <!-- Task lines -->
+  <rect x="182" y="175" width="136" height="10" rx="5" fill="#7c3aed" opacity="0.25"/>
+  <rect x="182" y="207" width="110" height="10" rx="5" fill="#7c3aed" opacity="0.2"/>
+  <rect x="182" y="239" width="124" height="10" rx="5" fill="#7c3aed" opacity="0.2"/>
+
+  <!-- JB text on book cover -->
+  <text x="253" y="318"
+    font-family="Georgia, serif"
+    font-size="64"
+    font-weight="700"
+    text-anchor="middle"
+    fill="#7c3aed"
+    opacity="0.75">JB</text>
+
+  <!-- Checkmark badge -->
+  <circle cx="340" cy="340" r="52" fill="#7c3aed"/>
+  <circle cx="340" cy="340" r="52" fill="url(#shine)"/>
+  <path d="M318 340 l16 16 32-32"
+    stroke="white" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>
