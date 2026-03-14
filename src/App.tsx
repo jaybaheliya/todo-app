@@ -1,6 +1,10 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { supabase } from "./supabase";
+import type { User } from "@supabase/supabase-js";
+
+// Krishiv@2026
 
 interface Todo {
   id: number;
@@ -20,27 +24,65 @@ interface Toast {
   type: "overdue" | "done";
 }
 
-const STORAGE_KEY = "todo_v3";
-const EXPIRY_KEY  = "todo_expiry";
-const ONE_YEAR    = 365 * 24 * 60 * 60 * 1000;
+/* ── Auth gate ── */
+function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent]   = useState(false);
+  const [loading, setLoading] = useState(false);
 
-function loadTodos(): Todo[] {
-  try {
-    const expiry = localStorage.getItem(EXPIRY_KEY);
-    if (expiry && Date.now() > Number(expiry)) {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(EXPIRY_KEY);
-      return [];
-    }
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
+  const send = async () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } });
+    setSent(true);
+    setLoading(false);
+  };
 
-function saveTodos(todos: Todo[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
-  if (!localStorage.getItem(EXPIRY_KEY))
-    localStorage.setItem(EXPIRY_KEY, String(Date.now() + ONE_YEAR));
+  // listen for magic-link redirect
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) onLogin(data.session.user);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) onLogin(session.user);
+    });
+    return () => subscription.unsubscribe();
+  }, [onLogin]);
+
+  return (
+    <section className="bg-mesh min-h-lvh flex items-center justify-center">
+      <div className="glass rounded-2xl p-8 max-w-sm w-full mx-4 space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="size-11 bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white rounded-2xl">
+            <Sparkle />
+          </span>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-fuchsia-500 bg-clip-text text-transparent">My Task</h1>
+        </div>
+        {sent ? (
+          <p className="text-sm text-gray-600 dark:text-gray-300">✉️ Check your email for a magic link to sign in!</p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Sign in to sync your tasks across all devices.</p>
+            <input
+              type="email"
+              placeholder="your@email.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && send()}
+              className="w-full px-4 py-3 rounded-xl border border-violet-200 dark:border-violet-700 bg-transparent text-gray-900 dark:text-white text-sm"
+            />
+            <button
+              onClick={send}
+              disabled={loading || !email.trim()}
+              className="w-full py-3 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white font-semibold text-sm disabled:opacity-50"
+            >
+              {loading ? "Sending…" : "Send magic link"}
+            </button>
+          </>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function formatDuration(ms: number): string {
@@ -185,14 +227,27 @@ function HourlyChart({ todos }: { todos: Todo[] }) {
 const tabs = ["All", "Active", "Completed"];
 
 const App = () => {
+  const [user, setUser]         = useState<User | null>(null);
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");          // datetime-local string
   const [showDL, setShowDL]     = useState(false);       // toggle deadline picker
-  const [todo, setTodo]         = useState<Todo[]>(loadTodos);
+  const [todo, setTodo]         = useState<Todo[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   const [toasts, setToasts]     = useState<Toast[]>([]);
   const [showChart, setShowChart] = useState(false);
   const notifPerm = useRef<NotificationPermission>("default");
+
+  /* load todos from Supabase when user logs in */
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("todos").select("*").eq("user_id", user.id).then(({ data }) => {
+      if (data) setTodo(data.map(r => ({
+        id: r.id, text: r.text, completed: r.completed,
+        createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
+        elapsed: r.elapsed, deadline: r.deadline, notified: r.notified,
+      })));
+    });
+  }, [user]);
 
   /* request notification permission once */
   useEffect(() => {
@@ -201,8 +256,6 @@ const App = () => {
     }
   }, []);
 
-  useEffect(() => { saveTodos(todo); }, [todo]);
-
   /* deadline watcher */
   useEffect(() => {
     const id = setInterval(() => {
@@ -210,10 +263,9 @@ const App = () => {
         if (t.completed || !t.deadline || t.notified) return t;
         if (Date.now() >= t.deadline) {
           const msg = `⏰ "${t.text}" — time's up! You missed the deadline.`;
-          // browser notification
           if (notifPerm.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico" });
-          // in-app toast
           setToasts(ts => [...ts, { id: Date.now(), text: msg, type: "overdue" }]);
+          supabase.from("todos").update({ notified: true }).eq("id", t.id);
           return { ...t, notified: true };
         }
         return t;
@@ -229,22 +281,30 @@ const App = () => {
     return () => clearTimeout(id);
   }, [toasts]);
 
-  const addTodo = useCallback(() => {
-    if (!input.trim()) return;
+  const addTodo = useCallback(async () => {
+    if (!input.trim() || !user) return;
     const dl = deadline ? new Date(deadline).getTime() : null;
-    setTodo(prev => [...prev, {
+    const newTodo: Todo = {
       id: Date.now(), text: input.trim(), completed: false,
       createdAt: Date.now(), startedAt: Date.now(), completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
-    }]);
+    };
+    setTodo(prev => [...prev, newTodo]);
+    await supabase.from("todos").insert({
+      id: newTodo.id, user_id: user.id, text: newTodo.text, completed: false,
+      created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
+      elapsed: 0, deadline: dl, notified: false,
+    });
     setInput(""); setDeadline(""); setShowDL(false);
-  }, [input, deadline]);
+  }, [input, deadline, user]);
 
-  const removeTodo = useCallback((id: number) => {
+  const removeTodo = useCallback(async (id: number) => {
     setTodo(prev => prev.filter(t => t.id !== id));
+    await supabase.from("todos").delete().eq("id", id);
   }, []);
 
-  const toggleTodo = useCallback((id: number) => {
+  const toggleTodo = useCallback(async (id: number) => {
+    let updated: Todo | null = null;
     setTodo(prev => prev.map(t => {
       if (t.id !== id) return t;
       if (!t.completed) {
@@ -252,13 +312,26 @@ const App = () => {
         const msg = `✅ "${t.text}" completed in ${formatDuration(elapsed)}!`;
         if (notifPerm.current === "granted") new Notification("My Task", { body: msg });
         setToasts(ts => [...ts, { id: Date.now(), text: msg, type: "done" }]);
-        return { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
+        updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
+        return updated;
       }
-      return { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
+      updated = { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
+      return updated;
     }));
+    if (updated) {
+      const u = updated as Todo;
+      await supabase.from("todos").update({
+        completed: u.completed, completed_at: u.completedAt,
+        started_at: u.startedAt, elapsed: u.elapsed, notified: u.notified,
+      }).eq("id", id);
+    }
   }, []);
 
-  const clearCompleted = useCallback(() => setTodo(prev => prev.filter(t => !t.completed)), []);
+  const clearCompleted = useCallback(async () => {
+    const ids = todo.filter(t => t.completed).map(t => t.id);
+    setTodo(prev => prev.filter(t => !t.completed));
+    if (ids.length) await supabase.from("todos").delete().in("id", ids);
+  }, [todo]);
 
   const filterTodo = useMemo(() => {
     switch (activeTab) {
@@ -277,6 +350,8 @@ const App = () => {
 
   /* min datetime for picker = now */
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
+
+  if (!user) return <AuthGate onLogin={setUser} />;
 
   return (
     <section className="bg-mesh min-h-lvh text-gray-900 dark:text-gray-50 transition-colors flex flex-col relative overflow-x-hidden">
@@ -324,6 +399,13 @@ const App = () => {
               title="Toggle activity chart"
             >
               <BarChart2 size={18} />
+            </button>
+            <button
+              onClick={() => supabase.auth.signOut().then(() => setUser(null))}
+              className="p-2.5 rounded-xl glass text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+              title="Sign out"
+            >
+              <LogOut size={18} />
             </button>
             <ToggleTheme />
           </div>

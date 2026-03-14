@@ -2,9 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>todo-app</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- PWA primary -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#7c3aed" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="My Task" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
+
+    <!-- iOS splash screens (covers common sizes) -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Android / general -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="My Task" />
+    <meta name="msapplication-TileColor" content="#7c3aed" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <!-- SEO / share -->
+    <meta name="description" content="Stay organised, stay productive — My Task todo app" />
+    <meta property="og:title" content="My Task" />
+    <meta property="og:description" content="Stay organised, stay productive" />
+    <meta property="og:type" content="website" />
+
+    <title>My Task</title>
   </head>
   <body>
     <div id="root"></div>
