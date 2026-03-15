@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Edit2, Save, Undo2, CheckSquare } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -9,7 +9,7 @@ import type { User } from "@supabase/supabase-js";
 // Krishiv@2026
 
 type Priority = "high" | "medium" | "low";
-type SortBy = "created" | "deadline" | "priority" | "alpha" | "elapsed";
+type SortBy = "created" | "deadline" | "priority" | "alphabetical" | "elapsed";
 
 interface Subtask {
   id: number;
@@ -517,7 +517,6 @@ const App = () => {
   const [authReady, setAuthReady] = useState(false);
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");
-  const [showDL, setShowDL]     = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [priority, setPriority] = useState<Priority>("medium");
   const [estimate, setEstimate] = useState("");
@@ -684,7 +683,7 @@ const App = () => {
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
     });
-    setInput(""); setDeadline(""); setShowDL(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
+    setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
 
   const removeTodo = useCallback(async (id: number, skipUndo = false) => {
@@ -900,7 +899,7 @@ const App = () => {
       case "priority":
         const prio = { high: 0, medium: 1, low: 2 };
         return arr.sort((a, b) => prio[a.priority] - prio[b.priority]);
-      case "alpha":
+      case "alphabetical":
         return arr.sort((a, b) => a.text.localeCompare(b.text));
       case "elapsed":
         return arr.sort((a, b) => b.elapsed - a.elapsed);
@@ -1228,7 +1227,7 @@ const App = () => {
               <div className="relative">
                 <button
                   onClick={() => {
-                    const sorts: SortBy[] = ["created", "deadline", "priority", "alpha", "elapsed"];
+                    const sorts: SortBy[] = ["created", "deadline", "priority", "alphabetical", "elapsed"];
                     const idx = sorts.indexOf(sortBy);
                     setSortBy(sorts[(idx + 1) % sorts.length]);
                   }}
