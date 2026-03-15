@@ -50,6 +50,7 @@ interface UndoAction {
 }
 
 /* ── Auth gate ── */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail]     = useState("");
   const [sent, setSent]       = useState(false);
@@ -585,7 +586,7 @@ const App = () => {
         }));
         setTodo(todos);
         const allTags = new Set<string>();
-        todos.forEach(t => t.tags.forEach(tag => allTags.add(tag)));
+        todos.forEach(t => t.tags.forEach((tag: string) => allTags.add(tag)));
         setAvailableTags(Array.from(allTags));
       }
     });
@@ -950,7 +951,11 @@ const App = () => {
       }
       if (e.key === "/") {
         e.preventDefault();
-        document.querySelector<HTMLInputElement>("input[placeholder*='Search']")?.focus();
+        const searchInput = document.querySelector<HTMLInputElement>("input[placeholder*='Search']");
+        if (searchInput) {
+          setShowSearch(true);
+          setTimeout(() => searchInput.focus(), 50);
+        }
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
