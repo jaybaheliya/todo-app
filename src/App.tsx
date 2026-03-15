@@ -50,7 +50,8 @@ interface UndoAction {
 }
 
 /* ── Auth gate ── */
-function _AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
+// @ts-ignore - Unused but kept for future auth implementation
+function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail]     = useState("");
   const [sent, setSent]       = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1562,7 +1563,7 @@ const App = () => {
 
       <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-5">
         <p className="px-5 md:px-0 text-xs text-purple-400/60 dark:text-purple-500/50">
-          &copy; {new Date().getFullYear().toString()} Made with ❤️ by JB · My Task
+          &copy; {String(new Date().getFullYear())} Made with ❤️ by JB · My Task
         </p>
       </footer>
     </section>
