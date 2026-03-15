@@ -41,11 +41,18 @@ function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
     return () => subscription.unsubscribe();
   }, [onLogin]);
 
+  /* clear any error hash from the URL on mount */
+  useEffect(() => {
+    if (window.location.hash.includes("error")) {
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   const send = async () => {
     if (!email.trim()) return;
     setLoading(true); setError("");
     const { error: err } = await supabase.auth.signInWithOtp({
-      email, options: { emailRedirectTo: window.location.href },
+      email, options: { emailRedirectTo: window.location.origin },
     });
     if (err) setError(err.message);
     else setSent(true);
