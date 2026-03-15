@@ -971,6 +971,7 @@ const App = () => {
   if (!authReady) return null;
 
   const activeProject = projects.find(p => p.id === selectedProject);
+  const currentYear = new Date().getFullYear();
 
   return (
     <section className="bg-mesh min-h-lvh text-gray-900 dark:text-gray-50 transition-colors flex flex-col relative overflow-x-hidden">
@@ -1563,7 +1564,7 @@ const App = () => {
 
       <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-5">
         <p className="px-5 md:px-0 text-xs text-purple-400/60 dark:text-purple-500/50">
-          &copy; {String(new Date().getFullYear())} Made with ❤️ by JB · My Task
+          &copy; {currentYear} Made with ❤️ by JB · My Task
         </p>
       </footer>
     </section>
