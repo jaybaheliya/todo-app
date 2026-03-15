@@ -721,7 +721,6 @@ const App = () => {
     let updated: Todo | null = null;
     let sideEffect: (() => void) | null = null;
     setTodo(prev => {
-      sideEffect = null;
       return prev.map(t => {
         if (t.id !== id) return t;
         if (!t.completed) {
@@ -745,7 +744,7 @@ const App = () => {
         return updated;
       });
     });
-    sideEffect?.();
+    if (sideEffect) sideEffect();
     if (updated) {
       const u = updated as Todo;
       await supabase.from("todos").update({
