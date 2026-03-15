@@ -1,10 +1,14 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
+import ProjectSidebar from "./components/ProjectSidebar";
+import type { Project } from "./components/ProjectSidebar";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { supabase } from "./supabase";
 import type { User } from "@supabase/supabase-js";
 
 // Krishiv@2026
+
+type Priority = "high" | "medium" | "low";
 
 interface Todo {
   id: number;
@@ -14,8 +18,13 @@ interface Todo {
   startedAt: number | null;
   completedAt: number | null;
   elapsed: number;
-  deadline: number | null;   // unix ms
+  deadline: number | null;
   notified: boolean;
+  priority: Priority;
+  estimate: number | null;
+  paused: boolean;
+  projectId: number | null;
+  emoji: string | null;
 }
 
 interface Toast {
@@ -124,22 +133,89 @@ function useTick(active: boolean) {
   }, [active]);
 }
 
+const PRIORITY_STYLES: Record<Priority, string> = {
+  high:   "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400",
+  medium: "bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-400",
+  low:    "bg-blue-100 text-blue-500 dark:bg-blue-900/50 dark:text-blue-400",
+};
+
 /* ── Live elapsed timer badge ── */
 function LiveTimer({ todo }: { todo: Todo }) {
-  const isRunning = !todo.completed && todo.startedAt !== null;
+  const isRunning = !todo.completed && !todo.paused && todo.startedAt !== null;
   useTick(isRunning);
   const ms = todo.elapsed + (isRunning && todo.startedAt ? Date.now() - todo.startedAt : 0);
+  const overEst = todo.estimate && ms > todo.estimate * 60000;
   if (ms < 1000 && !todo.completed) return null;
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-mono flex items-center gap-1 shrink-0 ${
       todo.completed
         ? "bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300"
+        : overEst
+        ? "bg-red-100 text-red-600 dark:bg-red-900/60 dark:text-red-400"
+        : todo.paused
+        ? "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
         : "bg-purple-100 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300"
     }`}>
-      {!todo.completed && <span className="size-1.5 rounded-full bg-purple-500 animate-pulse inline-block" />}
+      {!todo.completed && !todo.paused && <span className="size-1.5 rounded-full bg-purple-500 animate-pulse inline-block" />}
       {formatDuration(ms)}
+      {todo.estimate && !todo.completed && (
+        <span className="opacity-60">/ {todo.estimate}m</span>
+      )}
     </span>
   );
+}
+
+/* ── Animated emoji state indicator ── */
+const TASK_EMOJIS = ["🚀","💡","🎯","🔨","📝","🌟","⚡","🎨","🔬","🏆","🌈","🎵","🦋","🔥","💎"];
+
+const EMOJI_PICKER_LIST = [
+  "🚀","💡","🎯","🔨","📝","🌟","🎨","🔬","🏆","🌈","🎵","🦋","💎","💪","🧠",
+  "💻","📱","📚","🔍","🛠️","🎉","👀","🐼","🦖","🐶","🌵","🍎","⚽","🎮","🎧",
+  "💰","🔑","📧","📅","⏰","🚦","🏔️","🌊","☀️","⚡","🔥","❤️","👏","🤔","😄",
+];
+
+function EmojiPicker({ value, onChange }: { value: string | null; onChange: (e: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className={`text-xl px-2 py-1.5 rounded-xl transition-all hover:bg-violet-50 dark:hover:bg-violet-900/20 ${open ? "bg-violet-100 dark:bg-violet-900/40" : ""}`}
+        title="Pick emoji">
+        {value ?? "🎯"}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-[200] glass rounded-2xl p-2 grid grid-cols-9 gap-0.5 shadow-xl w-64">
+          {EMOJI_PICKER_LIST.map(e => (
+            <button key={e} type="button"
+              onClick={() => { onChange(e); setOpen(false); }}
+              className={`text-lg p-1 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-all ${
+                value === e ? "bg-violet-100 dark:bg-violet-900/40 ring-1 ring-violet-400" : ""
+              }`}>
+              {e}
+            </button>
+          ))}
+          {value && (
+            <button type="button" onClick={() => { onChange(null); setOpen(false); }}
+              className="col-span-9 text-[10px] text-gray-400 hover:text-red-400 pt-1 transition-colors">
+              clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskEmoji({ todo }: { todo: Todo }) {
+  const isOverdue = !todo.completed && !!todo.deadline && Date.now() >= todo.deadline;
+  const isUrgent  = !todo.completed && !!todo.deadline && !isOverdue && (todo.deadline - Date.now()) < 5 * 60 * 1000;
+
+  if (todo.completed)  return <span className="emoji-bounce text-base shrink-0 select-none">🎉</span>;
+  if (isOverdue)       return <span className="emoji-shake  text-base shrink-0 select-none">🔥</span>;
+  if (isUrgent)        return <span className="emoji-pulse  text-base shrink-0 select-none">⚡</span>;
+  if (todo.paused)     return <span className="emoji-zzz    text-base shrink-0 select-none">😴</span>;
+  const emoji = todo.emoji ?? TASK_EMOJIS[todo.id % TASK_EMOJIS.length];
+  return <span className="emoji-spin text-base shrink-0 select-none">{emoji}</span>;
 }
 
 /* ── Deadline countdown badge ── */
@@ -161,73 +237,258 @@ function DeadlineBadge({ todo }: { todo: Todo }) {
   );
 }
 
-/* ── Hourly bar chart (pure SVG) ── */
+type ChartView = "hourly" | "weekly" | "priority";
+
+/* ── Advanced interactive chart ── */
 function HourlyChart({ todos }: { todos: Todo[] }) {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const counts = useMemo(() => {
-    const map: Record<number, { active: number; done: number }> = {};
-    hours.forEach(h => (map[h] = { active: 0, done: 0 }));
+  const [view, setView]       = useState<ChartView>("hourly");
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(false); const t = setTimeout(() => setMounted(true), 30); return () => clearTimeout(t); }, [view]);
+
+  const now     = new Date();
+  const nowH    = now.getHours();
+
+  /* ── hourly data ── */
+  const hourly = useMemo(() => {
+    const map = Array.from({ length: 24 }, () => ({ active: 0, done: 0 }));
     todos.forEach(t => {
       const h = new Date(t.createdAt).getHours();
-      if (t.completed) map[h].done++;
-      else map[h].active++;
+      if (t.completed) map[h].done++; else map[h].active++;
     });
     return map;
   }, [todos]);
 
-  const now = new Date().getHours();
-  const maxVal = Math.max(1, ...hours.map(h => counts[h].active + counts[h].done));
-  const W = 560, H = 80, barW = W / 24;
+  /* ── weekly data (last 7 days) ── */
+  const weekly = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i));
+      return { label: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()], active: 0, done: 0, isToday: i === 6 };
+    });
+    todos.forEach(t => {
+      const diff = Math.floor((Date.now() - t.createdAt) / 86400000);
+      const idx  = 6 - diff;
+      if (idx >= 0 && idx < 7) {
+        if (t.completed) days[idx].done++; else days[idx].active++;
+      }
+    });
+    return days;
+  }, [todos]);
 
-  // only show hours that have data or ±2 from now
-  const relevant = hours.filter(h => counts[h].active + counts[h].done > 0 || Math.abs(h - now) <= 1);
-  if (relevant.length === 0) return null;
+  /* ── priority data ── */
+  const priorityData = useMemo(() => {
+    const map: Record<Priority, { active: number; done: number }> = { high: { active:0,done:0 }, medium: { active:0,done:0 }, low: { active:0,done:0 } };
+    todos.forEach(t => { if (t.completed) map[t.priority].done++; else map[t.priority].active++; });
+    return (["high","medium","low"] as Priority[]).map(p => ({ label: p, ...map[p] }));
+  }, [todos]);
 
-  return (
-    <div className="glass rounded-2xl px-4 pt-3 pb-2">
-      <div className="flex items-center gap-2 mb-2">
-        <BarChart2 size={14} className="text-violet-500" />
-        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Activity by hour</span>
-        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">now → {now}:00</span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full" style={{ height: 72 }}>
-        {hours.map(h => {
-          const total = counts[h].active + counts[h].done;
-          const doneH  = (counts[h].done   / maxVal) * H;
-          const activeH = (counts[h].active / maxVal) * H;
-          const x = h * barW + 1;
-          const isNow = h === now;
+  /* ── summary stats ── */
+  const totalDone   = todos.filter(t => t.completed).length;
+  const totalActive = todos.filter(t => !t.completed).length;
+  const totalMs     = todos.reduce((a, t) => a + t.elapsed, 0);
+  const avgMs       = totalDone > 0 ? Math.round(todos.filter(t=>t.completed).reduce((a,t)=>a+t.elapsed,0) / totalDone) : 0;
+
+  const W = 560, H = 100, PAD = 2;
+
+  /* ── render bars helper ── */
+  function renderBars(
+    items: { active: number; done: number; isToday?: boolean }[],
+    labels: (string | number)[],
+    showEvery = 1
+  ) {
+    const maxVal = Math.max(1, ...items.map(d => d.active + d.done));
+    const barW   = W / items.length;
+    return (
+      <svg viewBox={`0 0 ${W} ${H + 20}`} className="w-full" style={{ height: 110 }}>
+        {/* grid lines */}
+        {[0.25, 0.5, 0.75, 1].map(f => (
+          <line key={f} x1={0} y1={H - f * H} x2={W} y2={H - f * H}
+            stroke="currentColor" strokeWidth={0.5} opacity={0.08} className="text-gray-500" />
+        ))}
+        {items.map((d, i) => {
+          const total  = d.active + d.done;
+          const doneH  = (d.done   / maxVal) * H;
+          const actH   = (d.active / maxVal) * H;
+          const x      = i * barW + PAD;
+          const bw     = barW - PAD * 2;
+          const isHov  = hovered === i;
+          const isNowH = d.isToday !== undefined ? d.isToday : (view === "hourly" && i === nowH);
+          const scale  = mounted ? 1 : 0;
+          const origin = H;
           return (
-            <g key={h}>
+            <g key={i}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              style={{ cursor: "pointer" }}
+            >
+              {/* hover bg */}
+              {isHov && <rect x={x - 1} y={0} width={bw + 2} height={H + 1} rx={4} fill="currentColor" opacity={0.05} className="text-violet-500" />}
+
               {/* done bar */}
-              {doneH > 0 && (
-                <rect x={x} y={H - doneH} width={barW - 2} height={doneH}
-                  rx={2} fill={isNow ? "#a78bfa" : "#c4b5fd"} opacity={0.9} />
+              <rect
+                x={x} y={H - doneH * scale} width={bw} height={doneH * scale}
+                rx={3}
+                fill={isNowH ? "#a78bfa" : isHov ? "#c084fc" : "#c4b5fd"}
+                opacity={isHov ? 1 : 0.85}
+                style={{ transformOrigin: `0 ${origin}px`, transition: "height 0.5s cubic-bezier(.34,1.56,.64,1), y 0.5s cubic-bezier(.34,1.56,.64,1), fill 0.15s" }}
+              />
+              {/* active bar */}
+              <rect
+                x={x} y={H - doneH * scale - actH * scale} width={bw} height={actH * scale}
+                rx={3}
+                fill={isNowH ? "#f472b6" : isHov ? "#f9a8d4" : "#fbcfe8"}
+                opacity={isHov ? 1 : 0.8}
+                style={{ transition: "height 0.5s cubic-bezier(.34,1.56,.64,1) 0.05s, y 0.5s cubic-bezier(.34,1.56,.64,1) 0.05s, fill 0.15s" }}
+              />
+
+              {/* now pulse ring */}
+              {isNowH && (
+                <>
+                  <line x1={x + bw/2} y1={0} x2={x + bw/2} y2={H}
+                    stroke="#a78bfa" strokeWidth={1} strokeDasharray="3 2" opacity={0.5} />
+                  {total > 0 && <circle cx={x + bw/2} cy={H - doneH - actH - 5} r={3} fill="#a78bfa" opacity={0.9} />}
+                </>
               )}
-              {/* active bar stacked on top */}
-              {activeH > 0 && (
-                <rect x={x} y={H - doneH - activeH} width={barW - 2} height={activeH}
-                  rx={2} fill={isNow ? "#f472b6" : "#f9a8d4"} opacity={0.85} />
-              )}
-              {/* now indicator */}
-              {isNow && (
-                <line x1={x + (barW - 2) / 2} y1={0} x2={x + (barW - 2) / 2} y2={H + 14}
-                  stroke="#a78bfa" strokeWidth={1} strokeDasharray="3 2" opacity={0.6} />
-              )}
-              {/* hour label — only show every 3h or if has data */}
-              {(h % 3 === 0 || total > 0) && (
-                <text x={x + (barW - 2) / 2} y={H + 13} textAnchor="middle"
-                  fontSize={7} fill={isNow ? "#a78bfa" : "#9ca3af"} fontWeight={isNow ? "700" : "400"}>
-                  {h}
+
+              {/* label */}
+              {(i % showEvery === 0 || total > 0 || isNowH) && (
+                <text x={x + bw/2} y={H + 14} textAnchor="middle"
+                  fontSize={view === "priority" ? 9 : 7}
+                  fill={isNowH ? "#a78bfa" : isHov ? "#7c3aed" : "#9ca3af"}
+                  fontWeight={isNowH || isHov ? "700" : "400"}
+                  style={{ transition: "fill 0.15s" }}>
+                  {labels[i]}
                 </text>
               )}
+
+              {/* tooltip */}
+              {isHov && total > 0 && (() => {
+                const tx = Math.min(Math.max(x + bw/2, 30), W - 30);
+                const ty = Math.max(H - doneH - actH - 14, 8);
+                return (
+                  <g>
+                    <rect x={tx - 28} y={ty - 13} width={56} height={22} rx={5}
+                      fill="#1e1b4b" opacity={0.88} />
+                    <text x={tx} y={ty + 2} textAnchor="middle" fontSize={8} fill="white" fontWeight="600">
+                      {d.done > 0 && `✓${d.done} `}{d.active > 0 && `◎${d.active}`}
+                    </text>
+                  </g>
+                );
+              })()}
             </g>
           );
         })}
       </svg>
-      <div className="flex gap-3 mt-1">
+    );
+  }
+
+  const priorityColors: Record<Priority, { done: string; active: string }> = {
+    high:   { done: "#f87171", active: "#fca5a5" },
+    medium: { done: "#fb923c", active: "#fdba74" },
+    low:    { done: "#60a5fa", active: "#93c5fd" },
+  };
+
+  function renderPriorityBars() {
+    const maxVal = Math.max(1, ...priorityData.map(d => d.active + d.done));
+    const barW   = W / 3;
+    return (
+      <svg viewBox={`0 0 ${W} ${H + 20}`} className="w-full" style={{ height: 110 }}>
+        {[0.25,0.5,0.75,1].map(f => (
+          <line key={f} x1={0} y1={H - f*H} x2={W} y2={H - f*H}
+            stroke="currentColor" strokeWidth={0.5} opacity={0.08} className="text-gray-500" />
+        ))}
+        {priorityData.map((d, i) => {
+          const doneH = (d.done   / maxVal) * H;
+          const actH  = (d.active / maxVal) * H;
+          const x     = i * barW + PAD * 3;
+          const bw    = barW - PAD * 6;
+          const isHov = hovered === i;
+          const scale = mounted ? 1 : 0;
+          const col   = priorityColors[d.label as Priority];
+          return (
+            <g key={i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} style={{ cursor: "pointer" }}>
+              {isHov && <rect x={x-2} y={0} width={bw+4} height={H+1} rx={6} fill="currentColor" opacity={0.05} className="text-violet-500" />}
+              <rect x={x} y={H - doneH*scale} width={bw} height={doneH*scale} rx={4}
+                fill={col.done} opacity={isHov ? 1 : 0.85}
+                style={{ transition: "height 0.5s cubic-bezier(.34,1.56,.64,1), y 0.5s cubic-bezier(.34,1.56,.64,1)" }} />
+              <rect x={x} y={H - doneH*scale - actH*scale} width={bw} height={actH*scale} rx={4}
+                fill={col.active} opacity={isHov ? 1 : 0.75}
+                style={{ transition: "height 0.5s cubic-bezier(.34,1.56,.64,1) 0.05s, y 0.5s cubic-bezier(.34,1.56,.64,1) 0.05s" }} />
+              <text x={x + bw/2} y={H + 14} textAnchor="middle" fontSize={9}
+                fill={isHov ? "#7c3aed" : "#9ca3af"} fontWeight={isHov ? "700" : "500"}
+                style={{ transition: "fill 0.15s", textTransform: "capitalize" }}>
+                {d.label}
+              </text>
+              {isHov && (d.done + d.active) > 0 && (() => {
+                const tx = x + bw/2;
+                const ty = Math.max(H - doneH - actH - 14, 8);
+                return (
+                  <g>
+                    <rect x={tx-30} y={ty-13} width={60} height={22} rx={5} fill="#1e1b4b" opacity={0.88} />
+                    <text x={tx} y={ty+2} textAnchor="middle" fontSize={8} fill="white" fontWeight="600">
+                      {d.done > 0 && `✓${d.done} `}{d.active > 0 && `◎${d.active}`}
+                    </text>
+                  </g>
+                );
+              })()}
+            </g>
+          );
+        })}
+      </svg>
+    );
+  }
+
+  const viewLabels: Record<ChartView, string> = { hourly: "By Hour", weekly: "7 Days", priority: "Priority" };
+
+  return (
+    <div className="glass rounded-2xl px-4 pt-3 pb-3 space-y-3">
+      {/* header */}
+      <div className="flex items-center gap-2">
+        <BarChart2 size={14} className="text-violet-500" />
+        <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Activity</span>
+        {/* view switcher */}
+        <div className="ml-auto flex gap-1 bg-white/40 dark:bg-white/5 rounded-xl p-0.5">
+          {(["hourly","weekly","priority"] as ChartView[]).map(v => (
+            <button key={v} onClick={() => setView(v)}
+              className={`text-[10px] px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                view === v
+                  ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-sm"
+                  : "text-gray-500 dark:text-gray-400 hover:text-violet-500"
+              }`}>
+              {viewLabels[v]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* summary stat pills */}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { label: "Total",   val: todos.length,           color: "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300" },
+          { label: "Done",    val: totalDone,               color: "bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300" },
+          { label: "Active",  val: totalActive,             color: "bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-900/40 dark:text-fuchsia-300" },
+          { label: "Tracked", val: totalMs > 0 ? formatDuration(totalMs) : "—", color: "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300" },
+          { label: "Avg",     val: avgMs  > 0 ? formatDuration(avgMs)  : "—", color: "bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300" },
+        ].map(s => (
+          <span key={s.label} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.color}`}>
+            {s.label}: {s.val}
+          </span>
+        ))}
+      </div>
+
+      {/* chart */}
+      <div className="relative">
+        {view === "hourly"   && renderBars(hourly,  Array.from({length:24},(_,i)=>i), 3)}
+        {view === "weekly"   && renderBars(weekly,  weekly.map(d=>d.label), 1)}
+        {view === "priority" && renderPriorityBars()}
+      </div>
+
+      {/* legend */}
+      <div className="flex gap-3">
         <span className="flex items-center gap-1 text-[10px] text-gray-400"><span className="size-2 rounded-sm bg-fuchsia-300 inline-block" />Active</span>
         <span className="flex items-center gap-1 text-[10px] text-gray-400"><span className="size-2 rounded-sm bg-violet-300 inline-block" />Done</span>
+        {view === "hourly" && <span className="ml-auto text-[10px] text-violet-400 font-medium">now → {nowH}:00</span>}
+        {view === "weekly" && <span className="ml-auto text-[10px] text-violet-400 font-medium">last 7 days</span>}
       </div>
     </div>
   );
@@ -239,13 +500,36 @@ const App = () => {
   const [user, setUser]         = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [input, setInput]       = useState("");
-  const [deadline, setDeadline] = useState("");          // datetime-local string
-  const [showDL, setShowDL]     = useState(false);       // toggle deadline picker
+  const [deadline, setDeadline] = useState("");
+  const [showDL, setShowDL]     = useState(false);
+  const [priority, setPriority] = useState<Priority>("medium");
+  const [estimate, setEstimate] = useState("");
+  const [taskEmoji, setTaskEmoji] = useState<string | null>(null);
   const [todo, setTodo]         = useState<Todo[]>([]);
   const [activeTab, setActiveTab] = useState(0);
   const [toasts, setToasts]     = useState<Toast[]>([]);
   const [showChart, setShowChart] = useState(false);
-  const notifPerm = useRef<NotificationPermission>("default");
+  const [confetti, setConfetti]   = useState<{ id: number; x: number; color: string }[]>([]);
+  const [streak, setStreak]       = useState(0);
+  const notifPermRef = useRef<NotificationPermission>("default");
+  const toastCounter = useRef(0);
+  const notifiedIds  = useRef<Set<number>>(new Set());
+  const [projects, setProjects]       = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<number | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+
+  useEffect(() => {
+    const handler = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setSidebarOpen(true);
+      else setSidebarOpen(false);
+    };
+    handler();
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
 
   /* resolve auth session on mount, fall back to guest locally */
   useEffect(() => {
@@ -260,7 +544,7 @@ const App = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  /* load todos from Supabase when user logs in */
+  /* load todos + projects from Supabase when user logs in */
   useEffect(() => {
     if (!user) return;
     supabase.from("todos").select("*").eq("user_id", user.id).then(({ data }) => {
@@ -268,6 +552,13 @@ const App = () => {
         id: r.id, text: r.text, completed: r.completed,
         createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
         elapsed: r.elapsed, deadline: r.deadline, notified: r.notified,
+        priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
+        projectId: r.project_id ?? null, emoji: r.emoji ?? null,
+      })));
+    });
+    supabase.from("projects").select("*").eq("user_id", user.id).then(({ data }) => {
+      if (data) setProjects(data.map(r => ({
+        id: r.id, name: r.name, color: r.color, parentId: r.parent_id ?? null, collapsed: r.collapsed ?? false,
       })));
     });
   }, [user]);
@@ -275,7 +566,10 @@ const App = () => {
   /* request notification permission once */
   useEffect(() => {
     if ("Notification" in window) {
-      Notification.requestPermission().then(p => { notifPerm.current = p; });
+      notifPermRef.current = Notification.permission;
+      if (Notification.permission === "default") {
+        Notification.requestPermission().then(p => { notifPermRef.current = p; });
+      }
     }
   }, []);
 
@@ -285,9 +579,11 @@ const App = () => {
       setTodo(prev => prev.map(t => {
         if (t.completed || !t.deadline || t.notified) return t;
         if (Date.now() >= t.deadline) {
-          const msg = `⏰ "${t.text}" — time's up! You missed the deadline.`;
-          if (notifPerm.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico" });
-          setToasts(ts => [...ts, { id: Date.now(), text: msg, type: "overdue" }]);
+          if (notifiedIds.current.has(t.id)) return { ...t, notified: true };
+          notifiedIds.current.add(t.id);
+          const msg = `"${t.text}" — time's up! You missed the deadline.`;
+          if (notifPermRef.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `overdue-${t.id}` });
+          setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "overdue" }]);
           supabase.from("todos").update({ notified: true }).eq("id", t.id);
           return { ...t, notified: true };
         }
@@ -304,43 +600,110 @@ const App = () => {
     return () => clearTimeout(id);
   }, [toasts]);
 
+  const addProject = useCallback(async (name: string, color: string, parentId: number | null) => {
+    const p: Project = { id: Date.now(), name, color, parentId, collapsed: false };
+    setProjects(prev => [...prev, p]);
+    await supabase.from("projects").insert({ id: p.id, user_id: user!.id, name, color, parent_id: parentId, collapsed: false });
+  }, [user]);
+
+  const renameProject = useCallback(async (id: number, name: string) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, name } : p));
+    await supabase.from("projects").update({ name }).eq("id", id);
+  }, []);
+
+  const deleteProject = useCallback(async (id: number) => {
+    // collect all descendant ids
+    const collect = (pid: number, all: Project[]): number[] => {
+      const children = all.filter(p => p.parentId === pid);
+      return [pid, ...children.flatMap(c => collect(c.id, all))];
+    };
+    const ids = collect(id, projects);
+    setProjects(prev => prev.filter(p => !ids.includes(p.id)));
+    setTodo(prev => prev.map(t => ids.includes(t.projectId!) ? { ...t, projectId: null } : t));
+    if (selectedProject && ids.includes(selectedProject)) setSelectedProject(null);
+    for (const pid of ids) await supabase.from("projects").delete().eq("id", pid);
+  }, [projects, selectedProject]);
+
+  const toggleProjectCollapse = useCallback(async (id: number) => {
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, collapsed: !p.collapsed } : p));
+    const p = projects.find(p => p.id === id);
+    if (p) await supabase.from("projects").update({ collapsed: !p.collapsed }).eq("id", id);
+  }, [projects]);
+
   const addTodo = useCallback(async () => {
     if (!input.trim()) return;
-    const dl = deadline ? new Date(deadline).getTime() : null;
+    const dl  = deadline ? new Date(deadline).getTime() : null;
+    const est = estimate ? parseInt(estimate) : null;
     const newTodo: Todo = {
       id: Date.now(), text: input.trim(), completed: false,
       createdAt: Date.now(), startedAt: Date.now(), completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
+      priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
     };
     setTodo(prev => [...prev, newTodo]);
     await supabase.from("todos").insert({
-      id: newTodo.id, user_id: user.id, text: newTodo.text, completed: false,
+      id: newTodo.id, user_id: user!.id, text: newTodo.text, completed: false,
       created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
+      priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
     });
-    setInput(""); setDeadline(""); setShowDL(false);
-  }, [input, deadline, user]);
+    setInput(""); setDeadline(""); setShowDL(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
+  }, [input, deadline, estimate, priority, user, selectedProject]);
 
   const removeTodo = useCallback(async (id: number) => {
     setTodo(prev => prev.filter(t => t.id !== id));
     await supabase.from("todos").delete().eq("id", id);
   }, []);
 
-  const toggleTodo = useCallback(async (id: number) => {
+  const togglePause = useCallback(async (id: number) => {
     let updated: Todo | null = null;
     setTodo(prev => prev.map(t => {
-      if (t.id !== id) return t;
-      if (!t.completed) {
+      if (t.id !== id || t.completed) return t;
+      if (!t.paused) {
+        // pause: freeze elapsed
         const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
-        const msg = `✅ "${t.text}" completed in ${formatDuration(elapsed)}!`;
-        if (notifPerm.current === "granted") new Notification("My Task", { body: msg });
-        setToasts(ts => [...ts, { id: Date.now(), text: msg, type: "done" }]);
-        updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
-        return updated;
+        updated = { ...t, paused: true, elapsed, startedAt: null };
+      } else {
+        // resume
+        updated = { ...t, paused: false, startedAt: Date.now() };
       }
-      updated = { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
-      return updated;
+      return updated!;
     }));
+    if (updated) {
+      const u = updated as Todo;
+      await supabase.from("todos").update({ paused: u.paused, elapsed: u.elapsed, started_at: u.startedAt }).eq("id", id);
+    }
+  }, []);
+
+  const toggleTodo = useCallback(async (id: number) => {
+    let updated: Todo | null = null;
+    let sideEffect: (() => void) | null = null;
+    setTodo(prev => {
+      sideEffect = null;
+      return prev.map(t => {
+        if (t.id !== id) return t;
+        if (!t.completed) {
+          const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
+          const msg = `"${t.text}" completed in ${formatDuration(elapsed)}!`;
+          sideEffect = () => {
+            if (notifPermRef.current === "granted") {
+              new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `done-${t.id}` });
+            }
+            setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "done" }]);
+            const colors = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
+            setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: Date.now() + i, x: 20 + Math.random() * 60, color: colors[i % colors.length] })));
+            setTimeout(() => setConfetti([]), 1200);
+            setStreak(s => s + 1);
+          };
+          updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
+          return updated;
+        }
+        sideEffect = () => setStreak(s => Math.max(0, s - 1));
+        updated = { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
+        return updated;
+      });
+    });
+    sideEffect?.();
     if (updated) {
       const u = updated as Todo;
       await supabase.from("todos").update({
@@ -356,29 +719,70 @@ const App = () => {
     if (ids.length) await supabase.from("todos").delete().in("id", ids);
   }, [todo]);
 
+  const projectFilteredTodo = useMemo(() => {
+    if (selectedProject === null) return todo;
+    // include tasks from this project and all descendant projects
+    const collect = (pid: number, all: Project[]): number[] => {
+      const children = all.filter(p => p.parentId === pid);
+      return [pid, ...children.flatMap(c => collect(c.id, all))];
+    };
+    const ids = new Set(collect(selectedProject, projects));
+    return todo.filter(t => t.projectId !== null && ids.has(t.projectId));
+  }, [selectedProject, todo, projects]);
+
   const filterTodo = useMemo(() => {
     switch (activeTab) {
-      case 1: return todo.filter(t => !t.completed);
-      case 2: return todo.filter(t => t.completed);
-      default: return todo;
+      case 1: return projectFilteredTodo.filter(t => !t.completed);
+      case 2: return projectFilteredTodo.filter(t => t.completed);
+      default: return projectFilteredTodo;
     }
-  }, [activeTab, todo]);
+  }, [activeTab, projectFilteredTodo]);
 
-  const hasRunning = todo.some(t => !t.completed && t.startedAt !== null);
+  const taskCounts = useMemo(() => {
+    const map: Record<number, number> = {};
+    todo.forEach(t => { if (t.projectId) map[t.projectId] = (map[t.projectId] ?? 0) + 1; });
+    return map;
+  }, [todo]);
+
+  const doneCounts = useMemo(() => {
+    const map: Record<number, number> = {};
+    todo.forEach(t => { if (t.projectId && t.completed) map[t.projectId] = (map[t.projectId] ?? 0) + 1; });
+    return map;
+  }, [todo]);
+
+  const hasRunning = todo.some(t => !t.completed && !t.paused && t.startedAt !== null);
   useTick(hasRunning);
 
-  const remaining   = todo.filter(t => !t.completed).length;
-  const completed   = todo.filter(t => t.completed).length;
-  const progressPct = todo.length === 0 ? 0 : Math.round((completed / todo.length) * 100);
+  const remaining   = projectFilteredTodo.filter(t => !t.completed).length;
+  const completed   = projectFilteredTodo.filter(t => t.completed).length;
+  const progressPct = projectFilteredTodo.length === 0 ? 0 : Math.round((completed / projectFilteredTodo.length) * 100);
+  const totalTracked = projectFilteredTodo.reduce((acc, t) => {
+    const ms = t.elapsed + (!t.completed && !t.paused && t.startedAt ? Date.now() - t.startedAt : 0);
+    return acc + ms;
+  }, 0);
 
   /* min datetime for picker = now */
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
   if (!authReady) return null;
 
+  const activeProject = projects.find(p => p.id === selectedProject);
+
   return (
     <section className="bg-mesh min-h-lvh text-gray-900 dark:text-gray-50 transition-colors flex flex-col relative overflow-x-hidden">
       <div className="orb orb-1" /><div className="orb orb-2" /><div className="orb orb-3" />
+
+      {/* ── Confetti burst ── */}
+      {confetti.length > 0 && (
+        <div className="fixed inset-0 pointer-events-none z-[100] overflow-hidden">
+          {confetti.map(c => (
+            <span key={c.id} className="confetti-piece absolute text-lg"
+              style={{ left: `${c.x}%`, color: c.color, animationDelay: `${Math.random() * 0.3}s` }}>
+              {["✦","★","●","▲","◆"][Math.floor(Math.random()*5)]}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* ── Toast stack ── */}
       <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-xs w-full pointer-events-none">
@@ -399,8 +803,24 @@ const App = () => {
         ))}
       </div>
 
+      {/* ── Mobile sidebar overlay ── */}
+      {isMobile && sidebarOpen && (
+        <div className="fixed inset-0 z-40 flex">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+          <div className="relative z-50 w-64 max-w-[80vw] h-full overflow-y-auto p-4">
+            <ProjectSidebar
+              projects={projects} selectedId={selectedProject}
+              taskCounts={taskCounts} doneCounts={doneCounts}
+              onSelect={id => { setSelectedProject(id); setSidebarOpen(false); }}
+              onAdd={addProject} onRename={renameProject}
+              onDelete={deleteProject} onToggleCollapse={toggleProjectCollapse}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Header ── */}
-      <header className="relative z-10 max-w-3xl w-full mx-auto">
+      <header className="relative z-10 max-w-6xl w-full mx-auto">
         <div className="container flex items-center justify-between">
           <div className="flex items-start gap-3">
             <span className="size-11 md:size-14 bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white rounded-2xl shadow-lg shadow-violet-500/30 shrink-0">
@@ -437,25 +857,74 @@ const App = () => {
 
       {/* ── Main ── */}
       <main className="container relative z-10">
-        <div className="max-w-3xl w-full mx-auto space-y-4">
+        <div className="max-w-6xl w-full mx-auto flex gap-5 items-start">
+
+          {/* desktop sidebar */}
+          {!isMobile && (
+            <div className={`shrink-0 transition-all duration-300 overflow-hidden ${sidebarOpen ? "w-56" : "w-0"}`}>
+              <ProjectSidebar
+                projects={projects} selectedId={selectedProject}
+                taskCounts={taskCounts} doneCounts={doneCounts}
+                onSelect={setSelectedProject} onAdd={addProject}
+                onRename={renameProject} onDelete={deleteProject}
+                onToggleCollapse={toggleProjectCollapse}
+              />
+            </div>
+          )}
+
+          <div className="flex-1 min-w-0 space-y-4">
+          {/* sidebar toggle button */}
+          <button onClick={() => setSidebarOpen(s => !s)}
+            className="flex items-center gap-1.5 text-xs text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
+          >
+            {sidebarOpen && !isMobile ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+            {sidebarOpen && !isMobile ? "Hide projects" : "Projects"}
+          </button>
+
+          {/* active project breadcrumb */}
+          {activeProject && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <FolderOpen size={13} style={{ color: activeProject.color }} />
+              <span style={{ color: activeProject.color }} className="font-semibold">{activeProject.name}</span>
+              <span>· {remaining} remaining</span>
+            </div>
+          )}
 
           {/* progress */}
-          {todo.length > 0 && (
-            <div className="glass rounded-2xl px-5 py-3 flex items-center gap-4">
-              <span className="text-xs font-semibold text-purple-600 dark:text-purple-300 shrink-0">{progressPct}%</span>
-              <div className="flex-1 h-2 rounded-full bg-purple-100 dark:bg-purple-900/50 overflow-hidden">
-                <div className="h-full rounded-full progress-shimmer transition-all duration-700" style={{ width: `${progressPct}%` }} />
+          {projectFilteredTodo.length > 0 && (
+            <div className="glass rounded-2xl px-5 py-3 flex flex-col gap-2">
+              {/* dancing character above bar */}
+              <div className="relative h-6">
+                <span
+                  className={`absolute -top-0.5 text-lg transition-all duration-700 ease-in-out select-none ${
+                    progressPct === 100 ? "emoji-bounce" : remaining > 0 && todo.some(t => !t.completed && !t.paused) ? "emoji-walk" : "emoji-zzz"
+                  }`}
+                  style={{ left: `calc(${progressPct}% - 10px)`, display: "inline-block" }}
+                >
+                  {progressPct === 100 ? "🥳" : remaining > 0 && todo.some(t => !t.completed && !t.paused) ? "🏃" : "🚶"}
+                </span>
               </div>
-              <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{completed}/{todo.length} done</span>
+              <div className="flex items-center gap-4">
+                <span className="text-xs font-semibold text-purple-600 dark:text-purple-300 shrink-0">{progressPct}%</span>
+                <div className="flex-1 h-2 rounded-full bg-purple-100 dark:bg-purple-900/50 overflow-hidden">
+                  <div className="h-full rounded-full progress-shimmer transition-all duration-700" style={{ width: `${progressPct}%` }} />
+                </div>
+                <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">{completed}/{todo.length} done</span>
+                {streak >= 2 && (
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-300 shrink-0 streak-badge">
+                    🔥 {streak} streak
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
           {/* input */}
-          <div className="glass rounded-2xl p-2 flex flex-col gap-2">
+          <div className="glass rounded-2xl p-2 flex flex-col gap-2 z-50 relative">
             <div className="flex items-center gap-2">
               <input
                 type="text"
-                className="text-gray-900 dark:text-white flex-1 px-5 py-3.5 bg-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                className="text-gray-900 dark:text-white flex-1 px-4 py-3.5 bg-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
                 value={input}
                 onKeyDown={e => e.key === "Enter" && addTodo()}
                 onChange={e => setInput(e.target.value)}
@@ -463,34 +932,58 @@ const App = () => {
               />
               <button
                 onClick={() => setShowDL(s => !s)}
-                title="Set deadline"
-                className={`p-3 rounded-xl transition-all ${showDL || deadline ? "bg-violet-500 text-white" : "text-gray-400 hover:text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"}`}
+                title="Set deadline / options"
+                className={`shrink-0 p-2.5 rounded-xl transition-all ${showDL || deadline || taskEmoji ? "bg-violet-500 text-white" : "text-gray-400 hover:text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"}`}
               >
-                <Bell size={18} />
+                <Bell size={17} />
               </button>
               <button
                 onClick={addTodo}
-                className="bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white p-3.5 rounded-xl hover:from-violet-600 hover:to-fuchsia-600 transition-all shadow-md shadow-violet-500/30 disabled:opacity-40 disabled:shadow-none active:scale-95"
+                className="shrink-0 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white p-3 rounded-xl hover:from-violet-600 hover:to-fuchsia-600 transition-all shadow-md shadow-violet-500/30 disabled:opacity-40 disabled:shadow-none active:scale-95"
                 disabled={!input.trim()}
               >
                 <Plus size={20} />
               </button>
             </div>
             {showDL && (
-              <div className="flex items-center gap-2 px-2 pb-1 animate-slideIn">
-                <Clock size={14} className="text-violet-500 shrink-0" />
-                <input
-                  type="datetime-local"
-                  min={minDT}
-                  value={deadline}
-                  onChange={e => setDeadline(e.target.value)}
-                  className="flex-1 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5"
-                />
-                {deadline && (
-                  <button onClick={() => setDeadline("")} className="text-gray-400 hover:text-red-400">
-                    <BellOff size={14} />
-                  </button>
-                )}
+              <div className="flex flex-col gap-2 px-1 pb-1 animate-slideIn">
+                {/* emoji + deadline row */}
+                <div className="flex items-center gap-2">
+                  <EmojiPicker value={taskEmoji} onChange={setTaskEmoji} />
+                  <Clock size={14} className="text-violet-500 shrink-0" />
+                  <input
+                    type="datetime-local"
+                    min={minDT}
+                    value={deadline}
+                    onChange={e => setDeadline(e.target.value)}
+                    className="flex-1 min-w-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5"
+                  />
+                  {deadline && (
+                    <button onClick={() => setDeadline("")} className="shrink-0 text-gray-400 hover:text-red-400">
+                      <BellOff size={14} />
+                    </button>
+                  )}
+                </div>
+                {/* priority + estimate row */}
+                <div className="flex items-center gap-2">
+                  <Flag size={14} className="text-violet-500 shrink-0" />
+                  <div className="flex gap-1.5">
+                    {(["high", "medium", "low"] as Priority[]).map(p => (
+                      <button key={p} onClick={() => setPriority(p)}
+                        className={`text-xs px-2.5 py-1 rounded-lg font-medium capitalize transition-all ${
+                          priority === p ? PRIORITY_STYLES[p] + " ring-1 ring-current" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        }`}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number" min="1" max="480" placeholder="est. min"
+                    value={estimate}
+                    onChange={e => setEstimate(e.target.value)}
+                    className="w-20 shrink-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-2 py-1.5"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -530,7 +1023,10 @@ const App = () => {
               </div>
             ) : (
               filterTodo.map(t => (
-                <div key={t.id} className="todo-row flex items-center gap-2 w-full px-4 py-3.5 group hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+                <div key={t.id} className="todo-row flex items-center gap-2 w-full px-4 py-3 group hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+                  {/* project color dot */}
+                  {t.projectId && (() => { const proj = projects.find(p => p.id === t.projectId); return proj ? <span className="size-1.5 rounded-full shrink-0" style={{ background: proj.color }} /> : null; })()}
+
                   <button
                     className={`size-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
                       t.completed
@@ -542,22 +1038,42 @@ const App = () => {
                     {t.completed && <Check size={13} strokeWidth={3} />}
                   </button>
 
-                  <p className={`flex-1 min-w-0 truncate transition-colors ${
-                    t.completed ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-800 dark:text-gray-100"
-                  }`}>
-                    {t.text}
-                  </p>
+                  <TaskEmoji todo={t} />
 
-                  {/* badges */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <DeadlineBadge todo={t} />
-                    <LiveTimer todo={t} />
+                  {/* text + badges stacked on mobile, inline on sm+ */}
+                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+                    <p className={`min-w-0 truncate text-sm transition-colors ${
+                      t.completed ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-800 dark:text-gray-100"
+                    }`}>
+                      {t.text}
+                    </p>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5 shrink-0 ${PRIORITY_STYLES[t.priority]}`}>
+                        <Flag size={8} />{t.priority}
+                      </span>
+                      <DeadlineBadge todo={t} />
+                      <LiveTimer todo={t} />
+                    </div>
                   </div>
+
+                  {/* pause/resume */}
+                  {!t.completed && (
+                    <button
+                      onClick={() => togglePause(t.id)}
+                      className={`size-7 flex items-center justify-center rounded-xl transition-all shrink-0 ${
+                        t.paused
+                          ? "text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                          : "text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                      } opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible`}
+                      title={t.paused ? "Resume" : "Pause"}
+                    >
+                      {t.paused ? <Play size={13} /> : <Pause size={13} />}
+                    </button>
+                  )}
 
                   <button
                     onClick={() => removeTodo(t.id)}
-                    className="ml-1 size-8 flex items-center justify-center rounded-xl text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shrink-0
-                      opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible"
+                    className="size-8 flex items-center justify-center rounded-xl text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shrink-0 opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible"
                   >
                     <Trash2 size={15} />
                   </button>
@@ -569,7 +1085,7 @@ const App = () => {
               <div className="px-4 py-3 flex flex-wrap items-center gap-2 justify-between bg-white/20 dark:bg-black/10">
                 <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                   <Timer size={13} className="text-violet-500" />
-                  <span>{remaining} remaining · {completed} done</span>
+                  <span>{remaining} remaining · {completed} done · {formatDuration(totalTracked)} tracked</span>
                 </div>
                 {completed > 0 && (
                   <button onClick={clearCompleted}
@@ -580,10 +1096,11 @@ const App = () => {
               </div>
             )}
           </div>
-        </div>
+          </div>{/* end flex-1 */}
+        </div>{/* end flex gap-4 */}
       </main>
 
-      <footer className="relative z-10 max-w-3xl w-full mx-auto mt-auto pb-5">
+      <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-5">
         <p className="px-5 md:px-0 text-xs text-purple-400/60 dark:text-purple-500/50">
           &copy; {new Date().getFullYear()} Made with ❤️ by JB · My Task
         </p>
