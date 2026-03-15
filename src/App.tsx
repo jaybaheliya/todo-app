@@ -237,6 +237,7 @@ const tabs = ["All", "Active", "Completed"];
 
 const App = () => {
   const [user, setUser]         = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");          // datetime-local string
   const [showDL, setShowDL]     = useState(false);       // toggle deadline picker
@@ -245,6 +246,19 @@ const App = () => {
   const [toasts, setToasts]     = useState<Toast[]>([]);
   const [showChart, setShowChart] = useState(false);
   const notifPerm = useRef<NotificationPermission>("default");
+
+  /* resolve auth session on mount, fall back to guest locally */
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) setUser(data.session.user);
+      else setUser({ id: "local" } as unknown as User);
+      setAuthReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setUser(session?.user ?? ({ id: "local" } as unknown as User));
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   /* load todos from Supabase when user logs in */
   useEffect(() => {
@@ -291,7 +305,7 @@ const App = () => {
   }, [toasts]);
 
   const addTodo = useCallback(async () => {
-    if (!input.trim() || !user) return;
+    if (!input.trim()) return;
     const dl = deadline ? new Date(deadline).getTime() : null;
     const newTodo: Todo = {
       id: Date.now(), text: input.trim(), completed: false,
@@ -360,7 +374,7 @@ const App = () => {
   /* min datetime for picker = now */
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
-  if (!user) return <AuthGate onLogin={setUser} />;
+  if (!authReady) return null;
 
   return (
     <section className="bg-mesh min-h-lvh text-gray-900 dark:text-gray-50 transition-colors flex flex-col relative overflow-x-hidden">
