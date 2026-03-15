@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Edit2, Save, Undo2, CheckSquare } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -9,6 +9,13 @@ import type { User } from "@supabase/supabase-js";
 // Krishiv@2026
 
 type Priority = "high" | "medium" | "low";
+type SortBy = "created" | "deadline" | "priority" | "alpha" | "elapsed";
+
+interface Subtask {
+  id: number;
+  text: string;
+  completed: boolean;
+}
 
 interface Todo {
   id: number;
@@ -25,12 +32,21 @@ interface Todo {
   paused: boolean;
   projectId: number | null;
   emoji: string | null;
+  notes: string;
+  tags: string[];
+  subtasks: Subtask[];
+  order: number;
 }
 
 interface Toast {
   id: number;
   text: string;
-  type: "overdue" | "done";
+  type: "overdue" | "done" | "undo";
+}
+
+interface UndoAction {
+  type: "delete" | "complete" | "bulkDelete";
+  data: Todo | Todo[];
 }
 
 /* ── Auth gate ── */
@@ -502,11 +518,22 @@ const App = () => {
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");
   const [showDL, setShowDL]     = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const [priority, setPriority] = useState<Priority>("medium");
   const [estimate, setEstimate] = useState("");
   const [taskEmoji, setTaskEmoji] = useState<string | null>(null);
   const [todo, setTodo]         = useState<Todo[]>([]);
   const [activeTab, setActiveTab] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>("created");
+  const [selectedTasks, setSelectedTasks] = useState<Set<number>>(new Set());
+  const [undoStack, setUndoStack] = useState<UndoAction | null>(null);
+  const [expandedTask, setExpandedTask] = useState<number | null>(null);
+  const [editingTask, setEditingTask] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [toasts, setToasts]     = useState<Toast[]>([]);
   const [showChart, setShowChart] = useState(false);
   const [confetti, setConfetti]   = useState<{ id: number; x: number; color: string }[]>([]);
@@ -547,14 +574,21 @@ const App = () => {
   /* load todos + projects from Supabase when user logs in */
   useEffect(() => {
     if (!user) return;
-    supabase.from("todos").select("*").eq("user_id", user.id).then(({ data }) => {
-      if (data) setTodo(data.map(r => ({
-        id: r.id, text: r.text, completed: r.completed,
-        createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
-        elapsed: r.elapsed, deadline: r.deadline, notified: r.notified,
-        priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
-        projectId: r.project_id ?? null, emoji: r.emoji ?? null,
-      })));
+    supabase.from("todos").select("*").eq("user_id", user.id).order("order", { ascending: true }).then(({ data }) => {
+      if (data) {
+        const todos = data.map(r => ({
+          id: r.id, text: r.text, completed: r.completed,
+          createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
+          elapsed: r.elapsed, deadline: r.deadline, notified: r.notified,
+          priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
+          projectId: r.project_id ?? null, emoji: r.emoji ?? null,
+          notes: r.notes ?? "", tags: r.tags ?? [], subtasks: r.subtasks ?? [], order: r.order ?? r.id,
+        }));
+        setTodo(todos);
+        const allTags = new Set<string>();
+        todos.forEach(t => t.tags.forEach(tag => allTags.add(tag)));
+        setAvailableTags(Array.from(allTags));
+      }
     });
     supabase.from("projects").select("*").eq("user_id", user.id).then(({ data }) => {
       if (data) setProjects(data.map(r => ({
@@ -634,11 +668,13 @@ const App = () => {
     if (!input.trim()) return;
     const dl  = deadline ? new Date(deadline).getTime() : null;
     const est = estimate ? parseInt(estimate) : null;
+    const maxOrder = todo.length > 0 ? Math.max(...todo.map(t => t.order)) : 0;
     const newTodo: Todo = {
       id: Date.now(), text: input.trim(), completed: false,
       createdAt: Date.now(), startedAt: Date.now(), completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
+      notes: "", tags: [], subtasks: [], order: maxOrder + 1,
     };
     setTodo(prev => [...prev, newTodo]);
     await supabase.from("todos").insert({
@@ -646,14 +682,20 @@ const App = () => {
       created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
+      notes: "", tags: [], subtasks: [], order: newTodo.order,
     });
     setInput(""); setDeadline(""); setShowDL(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
-  }, [input, deadline, estimate, priority, user, selectedProject]);
+  }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
 
-  const removeTodo = useCallback(async (id: number) => {
+  const removeTodo = useCallback(async (id: number, skipUndo = false) => {
+    const task = todo.find(t => t.id === id);
+    if (!skipUndo && task) {
+      setUndoStack({ type: "delete", data: task });
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Task deleted", type: "undo" }]);
+    }
     setTodo(prev => prev.filter(t => t.id !== id));
     await supabase.from("todos").delete().eq("id", id);
-  }, []);
+  }, [todo]);
 
   const togglePause = useCallback(async (id: number) => {
     let updated: Todo | null = null;
@@ -714,14 +756,114 @@ const App = () => {
   }, []);
 
   const clearCompleted = useCallback(async () => {
-    const ids = todo.filter(t => t.completed).map(t => t.id);
+    const completed = todo.filter(t => t.completed);
+    setUndoStack({ type: "bulkDelete", data: completed });
+    setToasts(ts => [...ts, { id: ++toastCounter.current, text: `${completed.length} tasks cleared`, type: "undo" }]);
+    const ids = completed.map(t => t.id);
     setTodo(prev => prev.filter(t => !t.completed));
     if (ids.length) await supabase.from("todos").delete().in("id", ids);
   }, [todo]);
 
+  const bulkDelete = useCallback(async () => {
+    const tasks = todo.filter(t => selectedTasks.has(t.id));
+    setUndoStack({ type: "bulkDelete", data: tasks });
+    setToasts(ts => [...ts, { id: ++toastCounter.current, text: `${tasks.length} tasks deleted`, type: "undo" }]);
+    const ids = Array.from(selectedTasks);
+    setTodo(prev => prev.filter(t => !selectedTasks.has(t.id)));
+    setSelectedTasks(new Set());
+    if (ids.length) await supabase.from("todos").delete().in("id", ids);
+  }, [todo, selectedTasks]);
+
+  const bulkComplete = useCallback(async () => {
+    const ids = Array.from(selectedTasks);
+    setTodo(prev => prev.map(t => ids.includes(t.id) ? { ...t, completed: true, completedAt: Date.now() } : t));
+    setSelectedTasks(new Set());
+    for (const id of ids) await supabase.from("todos").update({ completed: true, completed_at: Date.now() }).eq("id", id);
+  }, [selectedTasks]);
+
+  const performUndo = useCallback(async () => {
+    if (!undoStack) return;
+    if (undoStack.type === "delete") {
+      const task = undoStack.data as Todo;
+      setTodo(prev => [...prev, task]);
+      await supabase.from("todos").insert({
+        id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
+        created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
+        elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
+        priority: task.priority, estimate: task.estimate, paused: task.paused,
+        project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
+      });
+    } else if (undoStack.type === "bulkDelete") {
+      const tasks = undoStack.data as Todo[];
+      setTodo(prev => [...prev, ...tasks]);
+      for (const task of tasks) {
+        await supabase.from("todos").insert({
+          id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
+          created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
+          elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
+          priority: task.priority, estimate: task.estimate, paused: task.paused,
+          project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
+        });
+      }
+    }
+    setUndoStack(null);
+    setToasts(ts => ts.filter(t => t.type !== "undo"));
+  }, [undoStack, user]);
+
+  const updateTaskText = useCallback(async (id: number, text: string) => {
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, text } : t));
+    await supabase.from("todos").update({ text }).eq("id", id);
+  }, []);
+
+  const updateTaskNotes = useCallback(async (id: number, notes: string) => {
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, notes } : t));
+    await supabase.from("todos").update({ notes }).eq("id", id);
+  }, []);
+
+  const addTag = useCallback(async (id: number, tag: string) => {
+    const task = todo.find(t => t.id === id);
+    if (!task || task.tags.includes(tag)) return;
+    const newTags = [...task.tags, tag];
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, tags: newTags } : t));
+    if (!availableTags.includes(tag)) setAvailableTags(prev => [...prev, tag]);
+    await supabase.from("todos").update({ tags: newTags }).eq("id", id);
+  }, [todo, availableTags]);
+
+  const removeTag = useCallback(async (id: number, tag: string) => {
+    const task = todo.find(t => t.id === id);
+    if (!task) return;
+    const newTags = task.tags.filter(t => t !== tag);
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, tags: newTags } : t));
+    await supabase.from("todos").update({ tags: newTags }).eq("id", id);
+  }, [todo]);
+
+  const addSubtask = useCallback(async (id: number, text: string) => {
+    const task = todo.find(t => t.id === id);
+    if (!task) return;
+    const newSubtask: Subtask = { id: Date.now(), text, completed: false };
+    const newSubtasks = [...task.subtasks, newSubtask];
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t));
+    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
+  }, [todo]);
+
+  const toggleSubtask = useCallback(async (taskId: number, subtaskId: number) => {
+    const task = todo.find(t => t.id === taskId);
+    if (!task) return;
+    const newSubtasks = task.subtasks.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+    setTodo(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t));
+    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
+  }, [todo]);
+
+  const deleteSubtask = useCallback(async (taskId: number, subtaskId: number) => {
+    const task = todo.find(t => t.id === taskId);
+    if (!task) return;
+    const newSubtasks = task.subtasks.filter(s => s.id !== subtaskId);
+    setTodo(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t));
+    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
+  }, [todo]);
+
   const projectFilteredTodo = useMemo(() => {
     if (selectedProject === null) return todo;
-    // include tasks from this project and all descendant projects
     const collect = (pid: number, all: Project[]): number[] => {
       const children = all.filter(p => p.parentId === pid);
       return [pid, ...children.flatMap(c => collect(c.id, all))];
@@ -730,13 +872,51 @@ const App = () => {
     return todo.filter(t => t.projectId !== null && ids.has(t.projectId));
   }, [selectedProject, todo, projects]);
 
+  const searchFilteredTodo = useMemo(() => {
+    if (!searchQuery.trim()) return projectFilteredTodo;
+    const q = searchQuery.toLowerCase();
+    return projectFilteredTodo.filter(t => 
+      t.text.toLowerCase().includes(q) || 
+      t.notes.toLowerCase().includes(q) ||
+      t.tags.some(tag => tag.toLowerCase().includes(q))
+    );
+  }, [searchQuery, projectFilteredTodo]);
+
+  const tagFilteredTodo = useMemo(() => {
+    if (!filterTag) return searchFilteredTodo;
+    return searchFilteredTodo.filter(t => t.tags.includes(filterTag));
+  }, [filterTag, searchFilteredTodo]);
+
+  const sortedTodo = useMemo(() => {
+    const arr = [...tagFilteredTodo];
+    switch (sortBy) {
+      case "deadline":
+        return arr.sort((a, b) => {
+          if (!a.deadline && !b.deadline) return 0;
+          if (!a.deadline) return 1;
+          if (!b.deadline) return -1;
+          return a.deadline - b.deadline;
+        });
+      case "priority":
+        const prio = { high: 0, medium: 1, low: 2 };
+        return arr.sort((a, b) => prio[a.priority] - prio[b.priority]);
+      case "alpha":
+        return arr.sort((a, b) => a.text.localeCompare(b.text));
+      case "elapsed":
+        return arr.sort((a, b) => b.elapsed - a.elapsed);
+      case "created":
+      default:
+        return arr.sort((a, b) => a.order - b.order);
+    }
+  }, [tagFilteredTodo, sortBy]);
+
   const filterTodo = useMemo(() => {
     switch (activeTab) {
-      case 1: return projectFilteredTodo.filter(t => !t.completed);
-      case 2: return projectFilteredTodo.filter(t => t.completed);
-      default: return projectFilteredTodo;
+      case 1: return sortedTodo.filter(t => !t.completed);
+      case 2: return sortedTodo.filter(t => t.completed);
+      default: return sortedTodo;
     }
-  }, [activeTab, projectFilteredTodo]);
+  }, [activeTab, sortedTodo]);
 
   const taskCounts = useMemo(() => {
     const map: Record<number, number> = {};
@@ -761,7 +941,27 @@ const App = () => {
     return acc + ms;
   }, 0);
 
-  /* min datetime for picker = now */
+  /* keyboard shortcuts */
+  useEffect(() => { 
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>("input[placeholder*='mind']")?.focus();
+      }
+      if (e.key === "/") {
+        e.preventDefault();
+        document.querySelector<HTMLInputElement>("input[placeholder*='Search']")?.focus();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        performUndo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [performUndo]);
+
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
   if (!authReady) return null;
@@ -789,12 +989,18 @@ const App = () => {
         {toasts.map(toast => (
           <div key={toast.id}
             className={`pointer-events-auto glass rounded-2xl px-4 py-3 flex items-start gap-3 shadow-xl animate-slideIn ${
-              toast.type === "overdue"
-                ? "border-red-400/40 dark:border-red-500/30"
-                : "border-green-400/40 dark:border-green-500/30"
+              toast.type === "overdue" ? "border-red-400/40 dark:border-red-500/30" :
+              toast.type === "undo" ? "border-violet-400/40 dark:border-violet-500/30" :
+              "border-green-400/40 dark:border-green-500/30"
             }`}>
-            <span className="text-lg shrink-0">{toast.type === "overdue" ? "⏰" : "✅"}</span>
+            <span className="text-lg shrink-0">{toast.type === "overdue" ? "⏰" : toast.type === "undo" ? "🔄" : "✅"}</span>
             <p className="text-xs text-gray-700 dark:text-gray-200 flex-1">{toast.text}</p>
+            {toast.type === "undo" && undoStack && (
+              <button onClick={performUndo}
+                className="text-xs font-semibold text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 shrink-0 pointer-events-auto">
+                Undo
+              </button>
+            )}
             <button onClick={() => setToasts(ts => ts.filter(t => t.id !== toast.id))}
               className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 pointer-events-auto">
               <X size={14} />
@@ -919,21 +1125,28 @@ const App = () => {
             </div>
           )}
 
-          {/* input */}
-          <div className="glass rounded-2xl p-2 flex flex-col gap-2 z-50 relative">
+          {/* add task input */}
+          <div className="glass rounded-2xl p-3">
             <div className="flex items-center gap-2">
               <input
                 type="text"
-                className="text-gray-900 dark:text-white flex-1 px-4 py-3.5 bg-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
+                className="text-gray-900 dark:text-white flex-1 px-4 py-2 bg-white/40 dark:bg-white/5 rounded-xl placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
                 value={input}
                 onKeyDown={e => e.key === "Enter" && addTodo()}
                 onChange={e => setInput(e.target.value)}
-                placeholder="What's on your mind?"
+                placeholder="What's on your mind? (press N)"
               />
               <button
-                onClick={() => setShowDL(s => !s)}
+                onClick={() => setShowSearch(s => !s)}
+                title="Search"
+                className={`shrink-0 p-2.5 rounded-xl transition-all ${showSearch ? "bg-blue-500 text-white" : "text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"}`}
+              >
+                <Search size={17} />
+              </button>
+              <button
+                onClick={() => setShowOptions(s => !s)}
                 title="Set deadline / options"
-                className={`shrink-0 p-2.5 rounded-xl transition-all ${showDL || deadline || taskEmoji ? "bg-violet-500 text-white" : "text-gray-400 hover:text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"}`}
+                className={`shrink-0 p-2.5 rounded-xl transition-all ${showOptions || deadline || taskEmoji ? "bg-violet-500 text-white" : "text-gray-400 hover:text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"}`}
               >
                 <Bell size={17} />
               </button>
@@ -945,49 +1158,124 @@ const App = () => {
                 <Plus size={20} />
               </button>
             </div>
-            {showDL && (
-              <div className="flex flex-col gap-2 px-1 pb-1 animate-slideIn">
-                {/* emoji + deadline row */}
-                <div className="flex items-center gap-2">
-                  <EmojiPicker value={taskEmoji} onChange={setTaskEmoji} />
-                  <Clock size={14} className="text-violet-500 shrink-0" />
-                  <input
-                    type="datetime-local"
-                    min={minDT}
-                    value={deadline}
-                    onChange={e => setDeadline(e.target.value)}
-                    className="flex-1 min-w-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5"
-                  />
-                  {deadline && (
-                    <button onClick={() => setDeadline("")} className="shrink-0 text-gray-400 hover:text-red-400">
-                      <BellOff size={14} />
-                    </button>
-                  )}
-                </div>
-                {/* priority + estimate row */}
-                <div className="flex items-center gap-2">
-                  <Flag size={14} className="text-violet-500 shrink-0" />
-                  <div className="flex gap-1.5">
-                    {(["high", "medium", "low"] as Priority[]).map(p => (
-                      <button key={p} onClick={() => setPriority(p)}
-                        className={`text-xs px-2.5 py-1 rounded-lg font-medium capitalize transition-all ${
-                          priority === p ? PRIORITY_STYLES[p] + " ring-1 ring-current" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                        }`}>
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="number" min="1" max="480" placeholder="est. min"
-                    value={estimate}
-                    onChange={e => setEstimate(e.target.value)}
-                    className="w-20 shrink-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-2 py-1.5"
-                  />
-                </div>
+
+            {/* search bar - appears on click */}
+            {showSearch && (
+              <div className="flex items-center gap-2 bg-white/40 dark:bg-white/5 rounded-xl px-3 py-2 mt-2 animate-slideIn">
+                <Search size={16} className="text-gray-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search tasks... (press /)"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="flex-1 bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-400 min-w-0"
+                  autoFocus
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery("")} className="text-gray-400 hover:text-red-400 shrink-0">
+                    <X size={14} />
+                  </button>
+                )}
               </div>
             )}
           </div>
 
+          {/* options panel (deadline, priority, estimate) */}
+          {showOptions && (
+            <div className="glass rounded-2xl p-3 flex flex-col gap-2 animate-slideIn">
+              {/* emoji + deadline row */}
+              <div className="flex items-center gap-2">
+                <EmojiPicker value={taskEmoji} onChange={setTaskEmoji} />
+                <Clock size={14} className="text-violet-500 shrink-0" />
+                <input
+                  type="datetime-local"
+                  min={minDT}
+                  value={deadline}
+                  onChange={e => setDeadline(e.target.value)}
+                  className="flex-1 min-w-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-3 py-1.5"
+                />
+                {deadline && (
+                  <button onClick={() => setDeadline("")} className="shrink-0 text-gray-400 hover:text-red-400">
+                    <BellOff size={14} />
+                  </button>
+                )}
+              </div>
+              {/* priority + estimate row */}
+              <div className="flex items-center gap-2">
+                <Flag size={14} className="text-violet-500 shrink-0" />
+                <div className="flex gap-1.5">
+                  {(["high", "medium", "low"] as Priority[]).map(p => (
+                    <button key={p} onClick={() => setPriority(p)}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-medium capitalize transition-all ${
+                        priority === p ? PRIORITY_STYLES[p] + " ring-1 ring-current" : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      }`}>
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number" min="1" max="480" placeholder="est. min"
+                  value={estimate}
+                  onChange={e => setEstimate(e.target.value)}
+                  className="w-20 shrink-0 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-violet-200 dark:border-violet-700 rounded-lg px-2 py-1.5"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* sort + tag filter */}
+          <div className="glass rounded-2xl p-3 flex flex-wrap gap-2">
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    const sorts: SortBy[] = ["created", "deadline", "priority", "alpha", "elapsed"];
+                    const idx = sorts.indexOf(sortBy);
+                    setSortBy(sorts[(idx + 1) % sorts.length]);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/40 dark:bg-white/5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all"
+                  title="Sort by"
+                >
+                  <ArrowUpDown size={14} />
+                  <span className="capitalize">{sortBy}</span>
+                </button>
+              </div>
+              {availableTags.length > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setFilterTag(filterTag ? null : availableTags[0])}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                      filterTag
+                        ? "bg-violet-500 text-white"
+                        : "bg-white/40 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                    }`}
+                    title="Filter by tag"
+                  >
+                    <Tag size={14} />
+                    {filterTag || "Tags"}
+                  </button>
+                  {filterTag && (
+                    <div className="absolute top-full mt-1 right-0 z-50 glass rounded-xl p-1 shadow-xl min-w-[120px]">
+                      {availableTags.map(tag => (
+                        <button key={tag}
+                          onClick={() => setFilterTag(tag)}
+                          className={`w-full text-left px-2 py-1 rounded-lg text-xs transition-all ${
+                            filterTag === tag
+                              ? "bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300"
+                              : "hover:bg-white/50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300"
+                          }`}>
+                          {tag}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setFilterTag(null)}
+                        className="w-full text-left px-2 py-1 rounded-lg text-xs text-gray-400 hover:text-red-400 transition-colors">
+                        Clear filter
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           {/* tabs */}
           <div className="glass rounded-2xl p-1.5 flex gap-1.5">
             {tabs.map((tab, i) => (
@@ -1010,6 +1298,33 @@ const App = () => {
           {/* chart */}
           {showChart && <HourlyChart todos={todo} />}
 
+          {/* bulk actions bar */}
+          {selectedTasks.size > 0 && (
+            <div className="glass rounded-2xl px-4 py-3 flex items-center gap-3 animate-slideIn">
+              <CheckSquare size={16} className="text-violet-500" />
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                {selectedTasks.size} selected
+              </span>
+              <div className="ml-auto flex gap-2">
+                <button
+                  onClick={bulkComplete}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-all">
+                  Mark done
+                </button>
+                <button
+                  onClick={bulkDelete}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/60 transition-all">
+                  Delete
+                </button>
+                <button
+                  onClick={() => setSelectedTasks(new Set())}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* list */}
           <div className="glass rounded-2xl overflow-hidden divide-y divide-white/30 dark:divide-white/5 max-h-[30rem] overflow-y-auto">
             {filterTodo.length === 0 ? (
@@ -1023,60 +1338,201 @@ const App = () => {
               </div>
             ) : (
               filterTodo.map(t => (
-                <div key={t.id} className="todo-row flex items-center gap-2 w-full px-4 py-3 group hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
-                  {/* project color dot */}
-                  {t.projectId && (() => { const proj = projects.find(p => p.id === t.projectId); return proj ? <span className="size-1.5 rounded-full shrink-0" style={{ background: proj.color }} /> : null; })()}
+                <div key={t.id} className="flex flex-col">
+                  <div className="todo-row flex items-center gap-2 w-full px-4 py-3 group hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
+                    {/* bulk select checkbox */}
+                    <input
+                      type="checkbox"
+                      checked={selectedTasks.has(t.id)}
+                      onChange={e => {
+                        const newSet = new Set(selectedTasks);
+                        if (e.target.checked) newSet.add(t.id);
+                        else newSet.delete(t.id);
+                        setSelectedTasks(newSet);
+                      }}
+                      className="size-4 rounded border-2 border-violet-300 dark:border-violet-700 shrink-0 cursor-pointer"
+                      onClick={e => e.stopPropagation()}
+                    />
 
-                  <button
-                    className={`size-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
-                      t.completed
-                        ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-sm shadow-violet-400/40"
-                        : "border-2 border-purple-300 dark:border-purple-700 hover:border-violet-500"
-                    }`}
-                    onClick={() => toggleTodo(t.id)}
-                  >
-                    {t.completed && <Check size={13} strokeWidth={3} />}
-                  </button>
+                    {/* project color dot */}
+                    {t.projectId && (() => { const proj = projects.find(p => p.id === t.projectId); return proj ? <span className="size-1.5 rounded-full shrink-0" style={{ background: proj.color }} /> : null; })()}
 
-                  <TaskEmoji todo={t} />
+                    <button
+                      className={`size-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+                        t.completed
+                          ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-sm shadow-violet-400/40"
+                          : "border-2 border-purple-300 dark:border-purple-700 hover:border-violet-500"
+                      }`}
+                      onClick={() => toggleTodo(t.id)}
+                    >
+                      {t.completed && <Check size={13} strokeWidth={3} />}
+                    </button>
 
-                  {/* text + badges stacked on mobile, inline on sm+ */}
-                  <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
-                    <p className={`min-w-0 truncate text-sm transition-colors ${
-                      t.completed ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-800 dark:text-gray-100"
-                    }`}>
-                      {t.text}
-                    </p>
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5 shrink-0 ${PRIORITY_STYLES[t.priority]}`}>
-                        <Flag size={8} />{t.priority}
-                      </span>
-                      <DeadlineBadge todo={t} />
-                      <LiveTimer todo={t} />
+                    <TaskEmoji todo={t} />
+
+                    {/* text + badges stacked on mobile, inline on sm+ */}
+                    <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+                      {editingTask === t.id ? (
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                          <input
+                            type="text"
+                            value={editText}
+                            onChange={e => setEditText(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") {
+                                updateTaskText(t.id, editText);
+                                setEditingTask(null);
+                              }
+                              if (e.key === "Escape") setEditingTask(null);
+                            }}
+                            onBlur={() => {
+                              updateTaskText(t.id, editText);
+                              setEditingTask(null);
+                            }}
+                            autoFocus
+                            className="flex-1 min-w-0 text-sm bg-white/60 dark:bg-white/10 rounded px-2 py-1 border border-violet-300 dark:border-violet-600"
+                          />
+                          <button onClick={() => { updateTaskText(t.id, editText); setEditingTask(null); }} className="text-green-500 hover:text-green-600 shrink-0">
+                            <Save size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <p
+                          className={`min-w-0 truncate text-sm transition-colors cursor-pointer ${
+                            t.completed ? "line-through text-gray-400 dark:text-gray-600" : "text-gray-800 dark:text-gray-100"
+                          }`}
+                          onDoubleClick={() => { setEditingTask(t.id); setEditText(t.text); }}
+                          title="Double-click to edit"
+                        >
+                          {t.text}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5 shrink-0 ${PRIORITY_STYLES[t.priority]}`}>
+                          <Flag size={8} />{t.priority}
+                        </span>
+                        {t.tags.map(tag => (
+                          <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 font-medium shrink-0">
+                            #{tag}
+                          </span>
+                        ))}
+                        <DeadlineBadge todo={t} />
+                        <LiveTimer todo={t} />
+                        {t.subtasks.length > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300 font-medium shrink-0">
+                            {t.subtasks.filter(s => s.completed).length}/{t.subtasks.length}
+                          </span>
+                        )}
+                      </div>
                     </div>
+
+                    {/* expand button */}
+                    <button
+                      onClick={() => setExpandedTask(expandedTask === t.id ? null : t.id)}
+                      className="size-7 flex items-center justify-center rounded-xl text-gray-400 hover:text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all shrink-0"
+                      title="Expand details"
+                    >
+                      {expandedTask === t.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
+
+                    {/* pause/resume */}
+                    {!t.completed && (
+                      <button
+                        onClick={() => togglePause(t.id)}
+                        className={`size-7 flex items-center justify-center rounded-xl transition-all shrink-0 ${
+                          t.paused
+                            ? "text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                            : "text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                        } opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible`}
+                        title={t.paused ? "Resume" : "Pause"}
+                      >
+                        {t.paused ? <Play size={13} /> : <Pause size={13} />}
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => removeTodo(t.id)}
+                      className="size-8 flex items-center justify-center rounded-xl text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shrink-0 opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
 
-                  {/* pause/resume */}
-                  {!t.completed && (
-                    <button
-                      onClick={() => togglePause(t.id)}
-                      className={`size-7 flex items-center justify-center rounded-xl transition-all shrink-0 ${
-                        t.paused
-                          ? "text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"
-                          : "text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20"
-                      } opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible`}
-                      title={t.paused ? "Resume" : "Pause"}
-                    >
-                      {t.paused ? <Play size={13} /> : <Pause size={13} />}
-                    </button>
-                  )}
+                  {/* expanded panel: notes + tags + subtasks */}
+                  {expandedTask === t.id && (
+                    <div className="px-4 pb-3 space-y-2 bg-white/20 dark:bg-black/10 animate-slideIn">
+                      {/* notes */}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Notes</label>
+                        <textarea
+                          value={t.notes}
+                          onChange={e => updateTaskNotes(t.id, e.target.value)}
+                          placeholder="Add notes..."
+                          className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-3 py-2 border border-violet-200 dark:border-violet-700 text-gray-800 dark:text-gray-200 min-h-[60px] resize-none"
+                        />
+                      </div>
 
-                  <button
-                    onClick={() => removeTodo(t.id)}
-                    className="size-8 flex items-center justify-center rounded-xl text-red-400 hover:text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all shrink-0 opacity-100 visible sm:opacity-0 sm:invisible sm:group-hover:opacity-100 sm:group-hover:visible"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                      {/* tags */}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Tags</label>
+                        <div className="flex flex-wrap gap-1">
+                          {t.tags.map(tag => (
+                            <span key={tag} className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 flex items-center gap-1">
+                              #{tag}
+                              <button onClick={() => removeTag(t.id, tag)} className="hover:text-red-500">
+                                <X size={10} />
+                              </button>
+                            </span>
+                          ))}
+                          <input
+                            type="text"
+                            placeholder="+ tag"
+                            onKeyDown={e => {
+                              if (e.key === "Enter" && e.currentTarget.value.trim()) {
+                                addTag(t.id, e.currentTarget.value.trim());
+                                e.currentTarget.value = "";
+                              }
+                            }}
+                            className="text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1 border border-violet-200 dark:border-violet-700 w-20"
+                          />
+                        </div>
+                      </div>
+
+                      {/* subtasks */}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Subtasks</label>
+                        <div className="space-y-1">
+                          {t.subtasks.map(sub => (
+                            <div key={sub.id} className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={sub.completed}
+                                onChange={() => toggleSubtask(t.id, sub.id)}
+                                className="size-3.5 rounded border-2 border-violet-300 dark:border-violet-700 shrink-0 cursor-pointer"
+                              />
+                              <span className={`flex-1 text-xs ${sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"}`}>
+                                {sub.text}
+                              </span>
+                              <button onClick={() => deleteSubtask(t.id, sub.id)} className="text-gray-400 hover:text-red-400 shrink-0">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                          <input
+                            type="text"
+                            placeholder="+ Add subtask"
+                            onKeyDown={e => {
+                              if (e.key === "Enter" && e.currentTarget.value.trim()) {
+                                addSubtask(t.id, e.currentTarget.value.trim());
+                                e.currentTarget.value = "";
+                              }
+                            }}
+                            className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1.5 border border-violet-200 dark:border-violet-700"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -1086,6 +1542,7 @@ const App = () => {
                 <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                   <Timer size={13} className="text-violet-500" />
                   <span>{remaining} remaining · {completed} done · {formatDuration(totalTracked)} tracked</span>
+                  <span className="text-gray-400">· Press <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">N</kbd> new task · <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">/</kbd> search · <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">Ctrl+Z</kbd> undo</span>
                 </div>
                 {completed > 0 && (
                   <button onClick={clearCompleted}
@@ -1097,7 +1554,7 @@ const App = () => {
             )}
           </div>
           </div>{/* end flex-1 */}
-        </div>{/* end flex gap-4 */}
+        </div>{/* end flex gap-5 */}
       </main>
 
       <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-5">
