@@ -744,7 +744,7 @@ const App = () => {
         return updated;
       });
     });
-    if (sideEffect) sideEffect();
+    if (sideEffect) (sideEffect as () => void)();
     if (updated) {
       const u = updated as Todo;
       await supabase.from("todos").update({
