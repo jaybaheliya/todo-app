@@ -831,6 +831,18 @@ const App = () => {
   useEffect(() => {
     supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
 
+    // Check existing session immediately
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session?.user) {
+        setUser(data.session.user);
+        setAuthReady(true);
+      } else if (import.meta.env.DEV) {
+        setUser({ id: "local" } as unknown as User);
+        setAuthReady(true);
+      }
+    });
+
+    // Also listen for auth changes (handles magic link redirect)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session?.user) {
         setUser(session.user);
@@ -841,6 +853,7 @@ const App = () => {
       }
       setAuthReady(true);
     });
+
     return () => subscription.unsubscribe();
   }, []);
 
