@@ -50,10 +50,19 @@ body {
   }
   .container {
     @apply max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8;
+    /* Safari iOS safe area */
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
   }
   input {
     @apply outline-none;
   }
+}
+
+/* Safari iOS bottom safe area for footer */
+.pb-safe {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
 }
 
 /* ── Animated mesh background ── */

@@ -846,16 +846,30 @@ const App = () => {
   /* load todos + projects from Supabase when user logs in */
   useEffect(() => {
     if (!user) return;
-    supabase.from("todos").select("*").eq("user_id", user.id).order("order", { ascending: true }).then(({ data }) => {
+    supabase.from("todos").select("*").eq("user_id", user.id).order("order", { ascending: true }).then(({ data, error }) => {
+      if (error) { console.error("load todos error:", error); return; }
       if (data) {
-        const todos = data.map(r => ({
-          id: r.id, text: r.text, completed: r.completed,
-          createdAt: r.created_at, startedAt: r.started_at, completedAt: r.completed_at,
-          elapsed: r.elapsed, deadline: r.deadline, notified: r.notified,
-          priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
-          projectId: r.project_id ?? null, emoji: r.emoji ?? null,
-          notes: r.notes ?? "", tags: r.tags ?? [], subtasks: r.subtasks ?? [], order: r.order ?? r.id,
-          canvas: r.canvas ?? null, pdf: r.pdf ?? null,
+        const todos: Todo[] = data.map(r => ({
+          id: r.id,
+          text: String(r.text ?? ""),
+          completed: Boolean(r.completed),
+          createdAt: Number(r.created_at) || Date.now(),
+          startedAt: r.started_at != null ? Number(r.started_at) : null,
+          completedAt: r.completed_at != null ? Number(r.completed_at) : null,
+          elapsed: Number(r.elapsed) || 0,
+          deadline: r.deadline != null ? Number(r.deadline) : null,
+          notified: Boolean(r.notified),
+          priority: (["high","medium","low"].includes(r.priority) ? r.priority : "medium") as Priority,
+          estimate: r.estimate != null ? Number(r.estimate) : null,
+          paused: Boolean(r.paused),
+          projectId: r.project_id != null ? Number(r.project_id) : null,
+          emoji: r.emoji ?? null,
+          notes: String(r.notes ?? ""),
+          tags: Array.isArray(r.tags) ? r.tags : [],
+          subtasks: Array.isArray(r.subtasks) ? r.subtasks : [],
+          order: Number(r.order) || r.id,
+          canvas: r.canvas ?? null,
+          pdf: r.pdf ?? null,
         }));
         setTodo(todos);
         const allTags = new Set<string>();
@@ -863,9 +877,11 @@ const App = () => {
         setAvailableTags(Array.from(allTags));
       }
     });
-    supabase.from("projects").select("*").eq("user_id", user.id).then(({ data }) => {
+    supabase.from("projects").select("*").eq("user_id", user.id).order("created_at", { ascending: true }).then(({ data, error }) => {
+      if (error) { console.error("load projects error:", error); return; }
       if (data) setProjects(data.map(r => ({
-        id: r.id, name: r.name, color: r.color, parentId: r.parent_id ?? null, collapsed: r.collapsed ?? false,
+        id: r.id, name: String(r.name ?? ""), color: r.color ?? "#a78bfa",
+        parentId: r.parent_id ?? null, collapsed: Boolean(r.collapsed),
       })));
     });
   }, [user]);
@@ -908,14 +924,21 @@ const App = () => {
   }, [toasts]);
 
   const addProject = useCallback(async (name: string, color: string, parentId: number | null) => {
+    if (!user) return;
     const p: Project = { id: Date.now(), name, color, parentId, collapsed: false };
     setProjects(prev => [...prev, p]);
-    await supabase.from("projects").insert({ id: p.id, user_id: user!.id, name, color, parent_id: parentId, collapsed: false });
+    const { error } = await supabase.from("projects").insert({ id: p.id, user_id: user.id, name, color, parent_id: parentId, collapsed: false });
+    if (error) {
+      console.error("addProject error:", error);
+      setProjects(prev => prev.filter(x => x.id !== p.id)); // rollback
+    }
   }, [user]);
 
   const renameProject = useCallback(async (id: number, name: string) => {
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, name } : p));
-    await supabase.from("projects").update({ name }).eq("id", id);
+    if (!name.trim()) return;
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, name: name.trim() } : p));
+    const { error } = await supabase.from("projects").update({ name: name.trim() }).eq("id", id);
+    if (error) console.error("renameProject error:", error);
   }, []);
 
   const deleteProject = useCallback(async (id: number) => {
@@ -938,104 +961,103 @@ const App = () => {
   }, [projects]);
 
   const addTodo = useCallback(async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !user) return;
+    const now = Date.now();
     const dl  = deadline ? new Date(deadline).getTime() : null;
     const est = estimate ? parseInt(estimate) : null;
     const maxOrder = todo.length > 0 ? Math.max(...todo.map(t => t.order)) : 0;
     const newTodo: Todo = {
-      id: Date.now(), text: input.trim(), completed: false,
-      createdAt: Date.now(), startedAt: Date.now(), completedAt: null,
+      id: now, text: input.trim(), completed: false,
+      createdAt: now, startedAt: now, completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: maxOrder + 1,
       canvas: null, pdf: null,
     };
     setTodo(prev => [...prev, newTodo]);
-    await supabase.from("todos").insert({
-      id: newTodo.id, user_id: user!.id, text: newTodo.text, completed: false,
+    setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
+    const { error: insertErr } = await supabase.from("todos").insert({
+      id: newTodo.id, user_id: user.id, text: newTodo.text, completed: false,
       created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
       canvas: null, pdf: null,
     });
-    setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
+    if (insertErr) {
+      console.error("addTodo error:", insertErr);
+      // rollback optimistic update
+      setTodo(prev => prev.filter(t => t.id !== newTodo.id));
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Failed to save task: " + insertErr.message, type: "overdue" }]);
+    }
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
 
   const removeTodo = useCallback(async (id: number, skipUndo = false) => {
     const task = todo.find(t => t.id === id);
-    if (!skipUndo && task) {
+    if (!task) return;
+    if (!skipUndo) {
       setUndoStack({ type: "delete", data: task });
       setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Task deleted", type: "undo" }]);
     }
     setTodo(prev => prev.filter(t => t.id !== id));
-    await supabase.from("todos").delete().eq("id", id);
+    const { error } = await supabase.from("todos").delete().eq("id", id);
+    if (error) {
+      console.error("removeTodo error:", error);
+      setTodo(prev => [...prev, task]); // rollback
+    }
   }, [todo]);
 
   const togglePause = useCallback(async (id: number) => {
-    let updated: Todo | null = null;
-    setTodo(prev => prev.map(t => {
-      if (t.id !== id || t.completed) return t;
-      if (!t.paused) {
-        // pause: freeze elapsed
-        const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
-        updated = { ...t, paused: true, elapsed, startedAt: null };
-      } else {
-        // resume
-        updated = { ...t, paused: false, startedAt: Date.now() };
-      }
-      return updated!;
-    }));
-    if (updated) {
-      const u = updated as Todo;
-      await supabase.from("todos").update({ paused: u.paused, elapsed: u.elapsed, started_at: u.startedAt }).eq("id", id);
-    }
+    setTodo(prev => {
+      const t = prev.find(t => t.id === id);
+      if (!t || t.completed) return prev;
+      const updated = t.paused
+        ? { ...t, paused: false, startedAt: Date.now() }
+        : { ...t, paused: true, elapsed: t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0), startedAt: null };
+      supabase.from("todos").update({ paused: updated.paused, elapsed: updated.elapsed, started_at: updated.startedAt }).eq("id", id);
+      return prev.map(x => x.id === id ? updated : x);
+    });
   }, []);
 
   const toggleTodo = useCallback(async (id: number) => {
-    let updated: Todo | null = null;
-    let sideEffect: (() => void) | null = null;
     setTodo(prev => {
-      return prev.map(t => {
-        if (t.id !== id) return t;
-        if (!t.completed) {
-          const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
-          const msg = `"${t.text}" completed in ${formatDuration(elapsed)}!`;
-          sideEffect = () => {
-            if (notifPermRef.current === "granted") {
-              new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `done-${t.id}` });
-            }
-            setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "done" }]);
-            const colors = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
-            setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: Date.now() + i, x: 20 + Math.random() * 60, color: colors[i % colors.length] })));
-            setTimeout(() => setConfetti([]), 1200);
-            setStreak(s => s + 1);
-          };
-          updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
-          return updated;
-        }
-        sideEffect = () => setStreak(s => Math.max(0, s - 1));
+      const t = prev.find(t => t.id === id);
+      if (!t) return prev;
+      let updated: Todo;
+      if (!t.completed) {
+        const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
+        updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
+        const msg = `"${t.text}" completed in ${formatDuration(elapsed)}!`;
+        if (notifPermRef.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `done-${t.id}` });
+        setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "done" }]);
+        const colors = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
+        setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: Date.now() + i, x: 20 + Math.random() * 60, color: colors[i % colors.length] })));
+        setTimeout(() => setConfetti([]), 1200);
+        setStreak(s => s + 1);
+      } else {
         updated = { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
-        return updated;
-      });
-    });
-    if (sideEffect) (sideEffect as () => void)();
-    if (updated) {
-      const u = updated as Todo;
-      await supabase.from("todos").update({
-        completed: u.completed, completed_at: u.completedAt,
-        started_at: u.startedAt, elapsed: u.elapsed, notified: u.notified,
+        setStreak(s => Math.max(0, s - 1));
+      }
+      supabase.from("todos").update({
+        completed: updated.completed, completed_at: updated.completedAt,
+        started_at: updated.startedAt, elapsed: updated.elapsed, notified: updated.notified,
       }).eq("id", id);
-    }
+      return prev.map(x => x.id === id ? updated : x);
+    });
   }, []);
 
   const clearCompleted = useCallback(async () => {
-    const completed = todo.filter(t => t.completed);
-    setUndoStack({ type: "bulkDelete", data: completed });
-    setToasts(ts => [...ts, { id: ++toastCounter.current, text: `${completed.length} tasks cleared`, type: "undo" }]);
-    const ids = completed.map(t => t.id);
+    const completedTasks = todo.filter(t => t.completed);
+    if (!completedTasks.length) return;
+    setUndoStack({ type: "bulkDelete", data: completedTasks });
+    setToasts(ts => [...ts, { id: ++toastCounter.current, text: `${completedTasks.length} tasks cleared`, type: "undo" }]);
+    const ids = completedTasks.map(t => t.id);
     setTodo(prev => prev.filter(t => !t.completed));
-    if (ids.length) await supabase.from("todos").delete().in("id", ids);
+    const { error } = await supabase.from("todos").delete().in("id", ids);
+    if (error) {
+      console.error("clearCompleted error:", error);
+      setTodo(prev => [...prev, ...completedTasks]); // rollback
+    }
   }, [todo]);
 
   const bulkDelete = useCallback(async () => {
@@ -1050,62 +1072,74 @@ const App = () => {
 
   const bulkComplete = useCallback(async () => {
     const ids = Array.from(selectedTasks);
-    setTodo(prev => prev.map(t => ids.includes(t.id) ? { ...t, completed: true, completedAt: Date.now() } : t));
+    const now = Date.now();
+    setTodo(prev => prev.map(t => ids.includes(t.id) ? { ...t, completed: true, completedAt: now, elapsed: t.elapsed + (t.startedAt ? now - t.startedAt : 0), startedAt: null } : t));
     setSelectedTasks(new Set());
-    for (const id of ids) await supabase.from("todos").update({ completed: true, completed_at: Date.now() }).eq("id", id);
+    for (const id of ids) {
+      const { error } = await supabase.from("todos").update({ completed: true, completed_at: now }).eq("id", id);
+      if (error) console.error("bulkComplete error:", error);
+    }
   }, [selectedTasks]);
 
+  const toDbRow = useCallback((task: Todo) => ({
+    id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
+    created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
+    elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
+    priority: task.priority, estimate: task.estimate, paused: task.paused,
+    project_id: task.projectId, emoji: task.emoji, notes: task.notes,
+    tags: task.tags, subtasks: task.subtasks, order: task.order,
+    canvas: task.canvas, pdf: task.pdf,
+  }), [user]);
+
   const performUndo = useCallback(async () => {
-    if (!undoStack) return;
-    if (undoStack.type === "delete") {
-      const task = undoStack.data as Todo;
-      setTodo(prev => [...prev, task]);
-      await supabase.from("todos").insert({
-        id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
-        created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
-        elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
-        priority: task.priority, estimate: task.estimate, paused: task.paused,
-        project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
-      });
-    } else if (undoStack.type === "bulkDelete") {
-      const tasks = undoStack.data as Todo[];
-      setTodo(prev => [...prev, ...tasks]);
-      for (const task of tasks) {
-        await supabase.from("todos").insert({
-          id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
-          created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
-          elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
-          priority: task.priority, estimate: task.estimate, paused: task.paused,
-          project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
-          canvas: task.canvas, pdf: task.pdf,
-        });
-      }
+    if (!undoStack || !user) return;
+    const tasks = undoStack.type === "delete" ? [undoStack.data as Todo] : undoStack.data as Todo[];
+    setTodo(prev => [...prev, ...tasks]);
+    for (const task of tasks) {
+      const { error } = await supabase.from("todos").insert(toDbRow(task));
+      if (error) console.error("undo insert error:", error);
     }
     setUndoStack(null);
     setToasts(ts => ts.filter(t => t.type !== "undo"));
-  }, [undoStack, user]);
+  }, [undoStack, user, toDbRow]);
 
   const updateTaskText = useCallback(async (id: number, text: string) => {
-    setTodo(prev => prev.map(t => t.id === id ? { ...t, text } : t));
-    await supabase.from("todos").update({ text }).eq("id", id);
+    if (!text.trim()) return;
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, text: text.trim() } : t));
+    const { error } = await supabase.from("todos").update({ text: text.trim() }).eq("id", id);
+    if (error) console.error("updateTaskText error:", error);
   }, []);
 
   const updateTaskNotes = useCallback(async (id: number, notes: string) => {
     setTodo(prev => prev.map(t => t.id === id ? { ...t, notes } : t));
-    await supabase.from("todos").update({ notes }).eq("id", id);
+    const { error } = await supabase.from("todos").update({ notes }).eq("id", id);
+    if (error) console.error("updateTaskNotes error:", error);
   }, []);
 
   const updateTaskCanvas = useCallback(async (id: number, canvas: string | null) => {
     setTodo(prev => prev.map(t => t.id === id ? { ...t, canvas } : t));
-    await supabase.from("todos").update({ canvas }).eq("id", id);
+    const { error } = await supabase.from("todos").update({ canvas }).eq("id", id);
+    if (error) console.error("updateTaskCanvas error:", error);
+    else setDrawingTask(null);
   }, []);
 
   const uploadPdf = useCallback(async (id: number, file: File) => {
+    if (!user) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: "PDF too large (max 10MB)", type: "overdue" }]);
+      return;
+    }
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) { alert("Not authenticated — please sign in again."); return; }
-    const path = `${user!.id}/${id}-${Date.now()}.pdf`;
+    if (!session) {
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Not authenticated — please sign in again", type: "overdue" }]);
+      return;
+    }
+    const path = `${user.id}/${id}-${Date.now()}.pdf`;
     const { error } = await supabase.storage.from("task-pdfs").upload(path, file, { upsert: true });
-    if (error) { alert("Upload failed: " + error.message); return; }
+    if (error) {
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Upload failed: " + error.message, type: "overdue" }]);
+      return;
+    }
     const { data } = supabase.storage.from("task-pdfs").getPublicUrl(path);
     const url = data.publicUrl;
     setTodo(prev => prev.map(t => t.id === id ? { ...t, pdf: url } : t));
@@ -1120,46 +1154,59 @@ const App = () => {
   }, []);
 
   const addTag = useCallback(async (id: number, tag: string) => {
-    const task = todo.find(t => t.id === id);
-    if (!task || task.tags.includes(tag)) return;
-    const newTags = [...task.tags, tag];
-    setTodo(prev => prev.map(t => t.id === id ? { ...t, tags: newTags } : t));
-    if (!availableTags.includes(tag)) setAvailableTags(prev => [...prev, tag]);
-    await supabase.from("todos").update({ tags: newTags }).eq("id", id);
-  }, [todo, availableTags]);
+    const trimmed = tag.trim().toLowerCase();
+    if (!trimmed) return;
+    setTodo(prev => {
+      const task = prev.find(t => t.id === id);
+      if (!task || task.tags.includes(trimmed)) return prev;
+      const newTags = [...task.tags, trimmed];
+      supabase.from("todos").update({ tags: newTags }).eq("id", id);
+      if (!availableTags.includes(trimmed)) setAvailableTags(a => [...a, trimmed]);
+      return prev.map(t => t.id === id ? { ...t, tags: newTags } : t);
+    });
+  }, [availableTags]);
 
   const removeTag = useCallback(async (id: number, tag: string) => {
-    const task = todo.find(t => t.id === id);
-    if (!task) return;
-    const newTags = task.tags.filter(t => t !== tag);
-    setTodo(prev => prev.map(t => t.id === id ? { ...t, tags: newTags } : t));
-    await supabase.from("todos").update({ tags: newTags }).eq("id", id);
-  }, [todo]);
+    setTodo(prev => {
+      const task = prev.find(t => t.id === id);
+      if (!task) return prev;
+      const newTags = task.tags.filter(t => t !== tag);
+      supabase.from("todos").update({ tags: newTags }).eq("id", id);
+      return prev.map(t => t.id === id ? { ...t, tags: newTags } : t);
+    });
+  }, []);
 
   const addSubtask = useCallback(async (id: number, text: string) => {
-    const task = todo.find(t => t.id === id);
-    if (!task) return;
-    const newSubtask: Subtask = { id: Date.now(), text, completed: false };
-    const newSubtasks = [...task.subtasks, newSubtask];
-    setTodo(prev => prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t));
-    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
-  }, [todo]);
+    if (!text.trim()) return;
+    setTodo(prev => {
+      const task = prev.find(t => t.id === id);
+      if (!task) return prev;
+      const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false };
+      const newSubtasks = [...task.subtasks, newSubtask];
+      supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
+      return prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t);
+    });
+  }, []);
 
   const toggleSubtask = useCallback(async (taskId: number, subtaskId: number) => {
-    const task = todo.find(t => t.id === taskId);
-    if (!task) return;
-    const newSubtasks = task.subtasks.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
-    setTodo(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t));
-    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
-  }, [todo]);
+    setTodo(prev => {
+      const task = prev.find(t => t.id === taskId);
+      if (!task) return prev;
+      const newSubtasks = task.subtasks.map(s => s.id === subtaskId ? { ...s, completed: !s.completed } : s);
+      supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
+      return prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t);
+    });
+  }, []);
 
   const deleteSubtask = useCallback(async (taskId: number, subtaskId: number) => {
-    const task = todo.find(t => t.id === taskId);
-    if (!task) return;
-    const newSubtasks = task.subtasks.filter(s => s.id !== subtaskId);
-    setTodo(prev => prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t));
-    await supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
-  }, [todo]);
+    setTodo(prev => {
+      const task = prev.find(t => t.id === taskId);
+      if (!task) return prev;
+      const newSubtasks = task.subtasks.filter(s => s.id !== subtaskId);
+      supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
+      return prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t);
+    });
+  }, []);
 
   const projectFilteredTodo = useMemo(() => {
     if (selectedProject === null) return todo;
@@ -1931,7 +1978,7 @@ const App = () => {
         </div>{/* end flex gap-5 */}
       </main>
 
-      <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-5">
+      <footer className="relative z-10 max-w-6xl w-full mx-auto mt-auto pb-safe">
         <p className="px-5 md:px-0 text-xs text-purple-400/60 dark:text-purple-500/50">
           &copy; {currentYear} Made with ❤️ by JB · My Task
         </p>
