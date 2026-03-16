@@ -829,29 +829,20 @@ const App = () => {
 
   /* resolve auth session on mount, fall back to guest locally only */
   useEffect(() => {
-    supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
-
-    // Check existing session immediately
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        setUser(data.session.user);
-        setAuthReady(true);
-      } else if (import.meta.env.DEV) {
-        setUser({ id: "local" } as unknown as User);
-        setAuthReady(true);
-      }
-    });
-
-    // Also listen for auth changes (handles magic link redirect)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    // onAuthStateChange is the single source of truth — fires on load, magic link, refresh
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setUser(session.user);
-      } else if (import.meta.env.DEV) {
-        setUser({ id: "local" } as unknown as User);
-      } else {
-        setUser(null);
+        setAuthReady(true);
+      } else if (event === "INITIAL_SESSION") {
+        // No session on first load
+        if (import.meta.env.DEV) {
+          setUser({ id: "local" } as unknown as User);
+        } else {
+          setUser(null);
+        }
+        setAuthReady(true);
       }
-      setAuthReady(true);
     });
 
     return () => subscription.unsubscribe();
