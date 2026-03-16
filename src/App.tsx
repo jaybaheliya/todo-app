@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -36,6 +36,7 @@ interface Todo {
   tags: string[];
   subtasks: Subtask[];
   order: number;
+  canvas: string | null; // base64 image data
 }
 
 interface Toast {
@@ -50,7 +51,6 @@ interface UndoAction {
 }
 
 /* ── Auth gate ── */
-// @ts-ignore - Unused but kept for future auth implementation
 function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
   const [email, setEmail]     = useState("");
   const [sent, setSent]       = useState(false);
@@ -511,6 +511,273 @@ function HourlyChart({ todos }: { todos: Todo[] }) {
   );
 }
 
+/* ── Canvas Drawing Component ── */
+function DrawingCanvas({ taskId, initialData, onSave, onClose }: { taskId: number; initialData: string | null; onSave: (data: string) => void; onClose: () => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [color, setColor] = useState("#7c3aed");
+  const [brushSize, setBrushSize] = useState(8);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [textInput, setTextInput] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Load initial data if exists
+    if (initialData) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0);
+      img.src = initialData;
+    } else {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }, [initialData]);
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setIsDrawing(true);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.strokeStyle = tool === "eraser" ? "#ffffff" : color;
+    ctx.lineWidth = tool === "eraser" ? brushSize * 3 : brushSize;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => setIsDrawing(false);
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const saveCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataURL = canvas.toDataURL("image/png");
+    onSave(dataURL);
+  };
+
+  const addTextToCanvas = () => {
+    if (!textInput.trim()) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.font = "bold 24px Arial";
+    ctx.fillStyle = color;
+    ctx.fillText(textInput, 20, 50);
+    setTextInput("");
+    setShowTextInput(false);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const maxW = canvas.width * 0.9;
+        const maxH = canvas.height * 0.9;
+        let w = img.width, h = img.height;
+        if (w > maxW) { h = (maxW / w) * h; w = maxW; }
+        if (h > maxH) { w = (maxH / h) * w; h = maxH; }
+        const x = (canvas.width - w) / 2;
+        const y = (canvas.height - h) / 2;
+        ctx.drawImage(img, x, y, w, h);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const colors = ["#7c3aed", "#000000", "#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#ec4899"];
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="glass rounded-2xl p-4 max-w-2xl w-full mx-4 space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Draw Note</h3>
+            <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Draw freely or add typed text</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Canvas */}
+        <canvas
+          ref={canvasRef}
+          width={600}
+          height={400}
+          className="w-full border-2 border-violet-200 dark:border-violet-700 rounded-xl cursor-crosshair bg-white"
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+        />
+
+        {/* hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleImageUpload}
+        />
+
+        {/* Tools */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Pen/Eraser */}
+          <div className="flex gap-1 bg-white/40 dark:bg-white/5 rounded-xl p-1">
+            <button
+              onClick={() => setTool("pen")}
+              className={`p-2 rounded-lg transition-all ${tool === "pen" ? "bg-violet-500 text-white" : "text-gray-500 hover:text-violet-500"}`}
+              title="Pen"
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              onClick={() => setTool("eraser")}
+              className={`p-2 rounded-lg transition-all ${tool === "eraser" ? "bg-violet-500 text-white" : "text-gray-500 hover:text-violet-500"}`}
+              title="Eraser"
+            >
+              <Eraser size={16} />
+            </button>
+          </div>
+
+          {/* Colors */}
+          <div className="flex gap-1.5">
+            {colors.map(c => (
+              <button
+                key={c}
+                onClick={() => { setColor(c); setTool("pen"); }}
+                className={`size-7 rounded-lg transition-all ${color === c && tool === "pen" ? "ring-2 ring-violet-500 ring-offset-2" : ""}`}
+                style={{ backgroundColor: c }}
+                title={c}
+              />
+            ))}
+          </div>
+
+          {/* Brush size */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 dark:text-gray-400">Size:</span>
+            <input
+              type="range"
+              min="1"
+              max="20"
+              value={brushSize}
+              onChange={e => setBrushSize(Number(e.target.value))}
+              className="w-20"
+            />
+            <span className="text-xs text-gray-600 dark:text-gray-300 font-mono w-6">{brushSize}</span>
+          </div>
+
+          {/* Actions */}
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-all flex items-center gap-1.5"
+              title="Upload image"
+            >
+              <Upload size={14} />
+              Upload
+            </button>
+            <button
+              onClick={() => setShowTextInput(!showTextInput)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/60 transition-all flex items-center gap-1.5"
+              title="Add typed text"
+            >
+              <Type size={14} />
+              Add Text
+            </button>
+            <button
+              onClick={clearCanvas}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+            >
+              Clear
+            </button>
+            <button
+              onClick={saveCanvas}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white hover:from-violet-600 hover:to-fuchsia-600 transition-all"
+            >
+              Save & Update
+            </button>
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        {/* Text input panel */}
+        {showTextInput && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">Add Text to Canvas:</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={textInput}
+                onChange={e => setTextInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addTextToCanvas()}
+                placeholder="Type your text here..."
+                className="flex-1 px-3 py-2 rounded-lg text-sm border border-blue-300 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                autoFocus
+              />
+              <button
+                onClick={addTextToCanvas}
+                disabled={!textInput.trim()}
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-500 text-white hover:bg-blue-600 transition-all disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const tabs = ["All", "Active", "Completed"];
 
 const App = () => {
@@ -545,6 +812,7 @@ const App = () => {
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [drawingTask, setDrawingTask] = useState<number | null>(null);
 
   useEffect(() => {
     const handler = () => {
@@ -558,15 +826,25 @@ const App = () => {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  /* resolve auth session on mount, fall back to guest locally */
+  /* resolve auth session on mount, fall back to guest locally only */
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) setUser(data.session.user);
-      else setUser({ id: "local" } as unknown as User);
+      if (data.session?.user) {
+        setUser(data.session.user);
+      } else if (import.meta.env.DEV) {
+        // Guest mode only in local development
+        setUser({ id: "local" } as unknown as User);
+      }
       setAuthReady(true);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? ({ id: "local" } as unknown as User));
+      if (session?.user) {
+        setUser(session.user);
+      } else if (import.meta.env.DEV) {
+        setUser({ id: "local" } as unknown as User);
+      } else {
+        setUser(null);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -583,6 +861,7 @@ const App = () => {
           priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
           projectId: r.project_id ?? null, emoji: r.emoji ?? null,
           notes: r.notes ?? "", tags: r.tags ?? [], subtasks: r.subtasks ?? [], order: r.order ?? r.id,
+          canvas: r.canvas ?? null,
         }));
         setTodo(todos);
         const allTags = new Set<string>();
@@ -675,6 +954,7 @@ const App = () => {
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: maxOrder + 1,
+      canvas: null,
     };
     setTodo(prev => [...prev, newTodo]);
     await supabase.from("todos").insert({
@@ -683,6 +963,7 @@ const App = () => {
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
+      canvas: null,
     });
     setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
@@ -802,6 +1083,7 @@ const App = () => {
           elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
           priority: task.priority, estimate: task.estimate, paused: task.paused,
           project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
+          canvas: task.canvas,
         });
       }
     }
@@ -817,6 +1099,11 @@ const App = () => {
   const updateTaskNotes = useCallback(async (id: number, notes: string) => {
     setTodo(prev => prev.map(t => t.id === id ? { ...t, notes } : t));
     await supabase.from("todos").update({ notes }).eq("id", id);
+  }, []);
+
+  const updateTaskCanvas = useCallback(async (id: number, canvas: string | null) => {
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, canvas } : t));
+    await supabase.from("todos").update({ canvas }).eq("id", id);
   }, []);
 
   const addTag = useCallback(async (id: number, tag: string) => {
@@ -968,6 +1255,7 @@ const App = () => {
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
   if (!authReady) return null;
+  if (!user) return <AuthGate onLogin={setUser} />;
 
   const activeProject = projects.find(p => p.id === selectedProject);
   const currentYear = new Date().getFullYear();
@@ -1535,6 +1823,38 @@ const App = () => {
                           />
                         </div>
                       </div>
+
+                      {/* canvas drawing */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">Canvas Note</label>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setDrawingTask(t.id)}
+                              className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/70 transition-all flex items-center gap-1"
+                            >
+                              <Pencil size={12} />
+                              {t.canvas ? "Edit" : "Draw"}
+                            </button>
+                            {t.canvas && (
+                              <button
+                                onClick={async () => {
+                                  if (window.confirm('Delete this canvas drawing?')) {
+                                    await updateTaskCanvas(t.id, null);
+                                  }
+                                }}
+                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1"
+                              >
+                                <Trash2 size={12} />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {t.canvas && (
+                          <img src={t.canvas} alt="Canvas note" className="w-full rounded-lg border border-violet-200 dark:border-violet-700" />
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1566,6 +1886,20 @@ const App = () => {
           &copy; {currentYear} Made with ❤️ by JB · My Task
         </p>
       </footer>
+
+      {/* Drawing Canvas Modal */}
+      {drawingTask !== null && (() => {
+        const task = todo.find(t => t.id === drawingTask);
+        if (!task) return null;
+        return (
+          <DrawingCanvas
+            taskId={task.id}
+            initialData={task.canvas}
+            onSave={(data) => updateTaskCanvas(task.id, data)}
+            onClose={() => setDrawingTask(null)}
+          />
+        );
+      })()}
     </section>
   );
 };
