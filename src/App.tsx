@@ -829,17 +829,8 @@ const App = () => {
 
   /* resolve auth session on mount, fall back to guest locally only */
   useEffect(() => {
-    // Handle magic link redirect — exchange code/token in URL for a session
     supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        setUser(data.session.user);
-      } else if (import.meta.env.DEV) {
-        setUser({ id: "local" } as unknown as User);
-      }
-      setAuthReady(true);
-    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session?.user) {
         setUser(session.user);
