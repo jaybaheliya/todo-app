@@ -1009,40 +1009,60 @@ const App = () => {
 
   const togglePause = useCallback(async (id: number) => {
     setTodo(prev => {
-      const t = prev.find(t => t.id === id);
+      const t = prev.find(x => x.id === id);
       if (!t || t.completed) return prev;
-      const updated = t.paused
-        ? { ...t, paused: false, startedAt: Date.now() }
-        : { ...t, paused: true, elapsed: t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0), startedAt: null };
-      supabase.from("todos").update({ paused: updated.paused, elapsed: updated.elapsed, started_at: updated.startedAt }).eq("id", id);
+      const now = Date.now();
+      const updated: Todo = t.paused
+        ? { ...t, paused: false, startedAt: now }
+        : { ...t, paused: true, elapsed: t.elapsed + (t.startedAt ? now - t.startedAt : 0), startedAt: null };
       return prev.map(x => x.id === id ? updated : x);
+    });
+    // Read fresh state after update and persist
+    setTodo(prev => {
+      const updated = prev.find(x => x.id === id);
+      if (updated) {
+        supabase.from("todos")
+          .update({ paused: updated.paused, elapsed: updated.elapsed, started_at: updated.startedAt })
+          .eq("id", id)
+          .then(({ error }) => { if (error) console.error("togglePause error:", error); });
+      }
+      return prev;
     });
   }, []);
 
   const toggleTodo = useCallback(async (id: number) => {
+    // Compute new state first, outside the setter
     setTodo(prev => {
-      const t = prev.find(t => t.id === id);
+      const t = prev.find(x => x.id === id);
       if (!t) return prev;
+      const now = Date.now();
       let updated: Todo;
       if (!t.completed) {
-        const elapsed = t.elapsed + (t.startedAt ? Date.now() - t.startedAt : 0);
-        updated = { ...t, completed: true, completedAt: Date.now(), elapsed, startedAt: null };
+        const elapsed = t.elapsed + (t.startedAt ? now - t.startedAt : 0);
+        updated = { ...t, completed: true, completedAt: now, elapsed, startedAt: null };
         const msg = `"${t.text}" completed in ${formatDuration(elapsed)}!`;
         if (notifPermRef.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `done-${t.id}` });
         setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "done" }]);
-        const colors = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
-        setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: Date.now() + i, x: 20 + Math.random() * 60, color: colors[i % colors.length] })));
+        const cols = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
+        setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: now + i, x: 20 + Math.random() * 60, color: cols[i % cols.length] })));
         setTimeout(() => setConfetti([]), 1200);
         setStreak(s => s + 1);
       } else {
-        updated = { ...t, completed: false, completedAt: null, startedAt: Date.now(), notified: false };
+        updated = { ...t, completed: false, completedAt: null, startedAt: now, notified: false };
         setStreak(s => Math.max(0, s - 1));
       }
-      supabase.from("todos").update({
-        completed: updated.completed, completed_at: updated.completedAt,
-        started_at: updated.startedAt, elapsed: updated.elapsed, notified: updated.notified,
-      }).eq("id", id);
       return prev.map(x => x.id === id ? updated : x);
+    });
+    // Read fresh state after update and persist
+    setTodo(prev => {
+      const updated = prev.find(x => x.id === id);
+      if (updated) {
+        supabase.from("todos")
+          .update({ completed: updated.completed, completed_at: updated.completedAt, started_at: updated.startedAt, elapsed: updated.elapsed, notified: updated.notified })
+          .eq("id", id)
+          .then(({ error }) => { if (error) console.error("toggleTodo error:", error); });
+      }
+      return prev;
     });
   }, []);
 
