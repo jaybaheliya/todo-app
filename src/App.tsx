@@ -1893,7 +1893,6 @@ const App = () => {
         if (!task) return null;
         return (
           <DrawingCanvas
-            taskId={task.id}
             initialData={task.canvas}
             onSave={(data) => updateTaskCanvas(task.id, data)}
             onClose={() => setDrawingTask(null)}
