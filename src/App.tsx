@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload, FileText } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -37,6 +37,7 @@ interface Todo {
   subtasks: Subtask[];
   order: number;
   canvas: string | null; // base64 image data
+  pdf: string | null; // Supabase Storage public URL
 }
 
 interface Toast {
@@ -828,11 +829,13 @@ const App = () => {
 
   /* resolve auth session on mount, fall back to guest locally only */
   useEffect(() => {
+    // Handle magic link redirect — exchange code/token in URL for a session
+    supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
+
     supabase.auth.getSession().then(({ data }) => {
       if (data.session?.user) {
         setUser(data.session.user);
       } else if (import.meta.env.DEV) {
-        // Guest mode only in local development
         setUser({ id: "local" } as unknown as User);
       }
       setAuthReady(true);
@@ -845,6 +848,7 @@ const App = () => {
       } else {
         setUser(null);
       }
+      setAuthReady(true);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -861,7 +865,7 @@ const App = () => {
           priority: r.priority ?? "medium", estimate: r.estimate ?? null, paused: r.paused ?? false,
           projectId: r.project_id ?? null, emoji: r.emoji ?? null,
           notes: r.notes ?? "", tags: r.tags ?? [], subtasks: r.subtasks ?? [], order: r.order ?? r.id,
-          canvas: r.canvas ?? null,
+          canvas: r.canvas ?? null, pdf: r.pdf ?? null,
         }));
         setTodo(todos);
         const allTags = new Set<string>();
@@ -954,7 +958,7 @@ const App = () => {
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: maxOrder + 1,
-      canvas: null,
+      canvas: null, pdf: null,
     };
     setTodo(prev => [...prev, newTodo]);
     await supabase.from("todos").insert({
@@ -963,7 +967,7 @@ const App = () => {
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
-      canvas: null,
+      canvas: null, pdf: null,
     });
     setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
@@ -1083,7 +1087,7 @@ const App = () => {
           elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
           priority: task.priority, estimate: task.estimate, paused: task.paused,
           project_id: task.projectId, emoji: task.emoji, notes: task.notes, tags: task.tags, subtasks: task.subtasks, order: task.order,
-          canvas: task.canvas,
+          canvas: task.canvas, pdf: task.pdf,
         });
       }
     }
@@ -1104,6 +1108,25 @@ const App = () => {
   const updateTaskCanvas = useCallback(async (id: number, canvas: string | null) => {
     setTodo(prev => prev.map(t => t.id === id ? { ...t, canvas } : t));
     await supabase.from("todos").update({ canvas }).eq("id", id);
+  }, []);
+
+  const uploadPdf = useCallback(async (id: number, file: File) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { alert("Not authenticated — please sign in again."); return; }
+    const path = `${user!.id}/${id}-${Date.now()}.pdf`;
+    const { error } = await supabase.storage.from("task-pdfs").upload(path, file, { upsert: true });
+    if (error) { alert("Upload failed: " + error.message); return; }
+    const { data } = supabase.storage.from("task-pdfs").getPublicUrl(path);
+    const url = data.publicUrl;
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, pdf: url } : t));
+    await supabase.from("todos").update({ pdf: url }).eq("id", id);
+  }, [user]);
+
+  const deletePdf = useCallback(async (id: number, url: string) => {
+    const path = url.split("/task-pdfs/")[1];
+    await supabase.storage.from("task-pdfs").remove([path]);
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, pdf: null } : t));
+    await supabase.from("todos").update({ pdf: null }).eq("id", id);
   }, []);
 
   const addTag = useCallback(async (id: number, tag: string) => {
@@ -1822,6 +1845,43 @@ const App = () => {
                             className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1.5 border border-violet-200 dark:border-violet-700"
                           />
                         </div>
+                      </div>
+
+                      {/* pdf attachment */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">PDF Attachment</label>
+                          <div className="flex gap-1">
+                            <label className="text-xs px-2 py-1 rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/70 transition-all flex items-center gap-1 cursor-pointer">
+                              <Upload size={12} />
+                              {t.pdf ? "Replace" : "Upload PDF"}
+                              <input
+                                type="file" accept="application/pdf" className="hidden"
+                                onChange={e => { const f = e.target.files?.[0]; if (f) uploadPdf(t.id, f); e.target.value = ""; }}
+                              />
+                            </label>
+                            {t.pdf && (
+                              <button
+                                onClick={() => window.confirm("Delete this PDF?") && deletePdf(t.id, t.pdf!)}
+                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1"
+                              >
+                                <Trash2 size={12} />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {t.pdf && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400">
+                              <FileText size={13} />
+                              <a href={t.pdf} target="_blank" rel="noopener noreferrer" className="underline hover:text-orange-700 truncate">
+                                Open in new tab
+                              </a>
+                            </div>
+                            <embed src={t.pdf} type="application/pdf" className="w-full rounded-lg border border-orange-200 dark:border-orange-700" style={{ height: 400 }} />
+                          </div>
+                        )}
                       </div>
 
                       {/* canvas drawing */}
