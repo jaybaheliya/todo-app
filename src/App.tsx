@@ -835,12 +835,7 @@ const App = () => {
         setUser(session.user);
         setAuthReady(true);
       } else if (event === "INITIAL_SESSION") {
-        // No session on first load
-        if (import.meta.env.DEV) {
-          setUser({ id: "local" } as unknown as User);
-        } else {
-          setUser(null);
-        }
+        setUser(null);
         setAuthReady(true);
       }
     });
