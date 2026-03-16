@@ -512,7 +512,7 @@ function HourlyChart({ todos }: { todos: Todo[] }) {
 }
 
 /* ── Canvas Drawing Component ── */
-function DrawingCanvas({ taskId, initialData, onSave, onClose }: { taskId: number; initialData: string | null; onSave: (data: string) => void; onClose: () => void }) {
+function DrawingCanvas({ initialData, onSave, onClose }: { initialData: string | null; onSave: (data: string) => void; onClose: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState("#7c3aed");
