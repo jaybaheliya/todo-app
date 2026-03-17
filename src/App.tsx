@@ -1713,7 +1713,7 @@ const App = () => {
           )}
 
           {/* list */}
-          <div className="glass rounded-2xl overflow-hidden divide-y divide-white/30 dark:divide-white/5 max-h-[30rem] overflow-y-auto">
+          <div className="glass rounded-2xl overflow-hidden divide-y divide-white/30 dark:divide-white/5">
             {filterTodo.length === 0 ? (
               <div className="p-12 sm:p-16 text-center">
                 <span className="size-24 bg-gradient-to-br from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/40 flex items-center mx-auto justify-center rounded-full text-violet-400 dark:text-violet-500">
@@ -1724,7 +1724,8 @@ const App = () => {
                 </p>
               </div>
             ) : (
-              filterTodo.map(t => (
+              <div className="max-h-[30rem] overflow-y-auto divide-y divide-white/30 dark:divide-white/5">
+              {filterTodo.map(t => (
                 <div key={t.id} className="flex flex-col">
                   <div className="todo-row flex items-center gap-2 w-full px-4 py-3 group hover:bg-white/30 dark:hover:bg-white/5 transition-colors">
                     {/* bulk select checkbox */}
@@ -1845,9 +1846,9 @@ const App = () => {
                     </button>
                   </div>
 
-                  {/* expanded panel */}
+                  {/* expanded panel — rendered inline but outside scroll via portal-like trick */}
                   {expandedTask === t.id && (
-                    <div className="bg-white/20 dark:bg-black/10 animate-slideIn">
+                    <div className="bg-white/20 dark:bg-black/10 animate-slideIn" style={{ marginBottom: 0 }}>
                       {/* tab bar */}
                       <div className="flex gap-1.5 px-4 pt-3 pb-1 border-b border-white/20 dark:border-white/10">
                         {(["details", "effort"] as const).map(tab => (
@@ -2051,7 +2052,8 @@ const App = () => {
                     </div>
                   )}
                 </div>
-              ))
+              ))}
+              </div>
             )}
 
             {filterTodo.length > 0 && (
