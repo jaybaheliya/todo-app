@@ -60,8 +60,13 @@ interface EstimationItem {
   hours: string;
 }
 
-function createEstimationItem(): EstimationItem {
-  return { id: Date.now() + Math.floor(Math.random() * 1000), project: "", task: "", subtask: "", hours: "" };
+function createEstimationItem(existingIds: number[] = []): EstimationItem {
+  return { id: getNextIntId(existingIds), project: "", task: "", subtask: "", hours: "" };
+}
+
+function getNextIntId(values: number[]): number {
+  const max = values.reduce((currentMax, value) => (value > currentMax ? value : currentMax), 0);
+  return max + 1;
 }
 
 function formatHours(hours: number): string {
@@ -894,7 +899,7 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [drawingTask, setDrawingTask] = useState<number | null>(null);
-  const [estimationItems, setEstimationItems] = useState<EstimationItem[]>(() => [createEstimationItem()]);
+  const [estimationItems, setEstimationItems] = useState<EstimationItem[]>(() => [createEstimationItem([])]);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   useEffect(() => {
@@ -1027,7 +1032,8 @@ const App = () => {
 
   const addProject = useCallback(async (name: string, color: string, parentId: number | null) => {
     if (!user) return;
-    const p: Project = { id: Date.now(), name, color, parentId, collapsed: false };
+    const nextProjectId = getNextIntId(projects.map(project => project.id));
+    const p: Project = { id: nextProjectId, name, color, parentId, collapsed: false };
     setProjects(prev => [...prev, p]);
     const { error } = await supabase.from("projects").insert({ id: p.id, user_id: user.id, name, color, parent_id: parentId, collapsed: false });
     if (error) {
@@ -1068,8 +1074,9 @@ const App = () => {
     const dl  = deadline ? new Date(deadline).getTime() : null;
     const est = estimate ? parseInt(estimate) : null;
     const maxOrder = todo.length > 0 ? Math.max(...todo.map(t => t.order)) : 0;
+    const nextTodoId = getNextIntId(todo.map(task => task.id));
     const newTodo: Todo = {
-      id: now, text: input.trim(), completed: false,
+      id: nextTodoId, text: input.trim(), completed: false,
       createdAt: now, startedAt: now, completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
@@ -1303,7 +1310,11 @@ const App = () => {
     setTodo(prev => {
       const task = prev.find(t => t.id === id);
       if (!task) return prev;
-      const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false };
+      const newSubtask: Subtask = {
+        id: getNextIntId(task.subtasks.map(subtask => subtask.id)),
+        text: text.trim(),
+        completed: false,
+      };
       const newSubtasks = [...task.subtasks, newSubtask];
       supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
       return prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t);
@@ -1461,7 +1472,7 @@ const App = () => {
   );
 
   const addEstimationRow = () => {
-    setEstimationItems(prev => [...prev, createEstimationItem()]);
+    setEstimationItems(prev => [...prev, createEstimationItem(prev.map(item => item.id))]);
   };
 
   const updateEstimationRow = (id: number, field: keyof Omit<EstimationItem, "id">, value: string) => {
@@ -1470,7 +1481,7 @@ const App = () => {
   };
 
   const removeEstimationRow = (id: number) => {
-    setEstimationItems(prev => (prev.length === 1 ? [createEstimationItem()] : prev.filter(item => item.id !== id)));
+    setEstimationItems(prev => (prev.length === 1 ? [createEstimationItem([])] : prev.filter(item => item.id !== id)));
     setCopyStatus("idle");
   };
 
