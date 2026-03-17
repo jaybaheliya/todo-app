@@ -925,12 +925,15 @@ const App = () => {
 
   const addProject = useCallback(async (name: string, color: string, parentId: number | null) => {
     if (!user) return;
-    const p: Project = { id: Date.now(), name, color, parentId, collapsed: false };
+    const tempId = Date.now();
+    const p: Project = { id: tempId, name, color, parentId, collapsed: false };
     setProjects(prev => [...prev, p]);
-    const { error } = await supabase.from("projects").insert({ id: p.id, user_id: user.id, name, color, parent_id: parentId, collapsed: false });
+    const { data: inserted, error } = await supabase.from("projects").insert({ user_id: user.id, name, color, parent_id: parentId, collapsed: false }).select("id").single();
     if (error) {
       console.error("addProject error:", error);
-      setProjects(prev => prev.filter(x => x.id !== p.id)); // rollback
+      setProjects(prev => prev.filter(x => x.id !== tempId)); // rollback
+    } else if (inserted) {
+      setProjects(prev => prev.map(x => x.id === tempId ? { ...x, id: inserted.id } : x));
     }
   }, [user]);
 
@@ -976,19 +979,21 @@ const App = () => {
     };
     setTodo(prev => [...prev, newTodo]);
     setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
-    const { error: insertErr } = await supabase.from("todos").insert({
-      id: newTodo.id, user_id: user.id, text: newTodo.text, completed: false,
+    const { data: inserted, error: insertErr } = await supabase.from("todos").insert({
+      user_id: user.id, text: newTodo.text, completed: false,
       created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
       canvas: null, pdf: null,
-    });
+    }).select("id").single();
     if (insertErr) {
       console.error("addTodo error:", insertErr);
-      // rollback optimistic update
       setTodo(prev => prev.filter(t => t.id !== newTodo.id));
       setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Failed to save task: " + insertErr.message, type: "overdue" }]);
+    } else if (inserted) {
+      // Replace the temp client-side id with the real DB-generated id
+      setTodo(prev => prev.map(t => t.id === newTodo.id ? { ...t, id: inserted.id } : t));
     }
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
 
