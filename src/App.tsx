@@ -15,6 +15,7 @@ interface Subtask {
   id: number;
   text: string;
   completed: boolean;
+  effort: number | null; // minutes
 }
 
 interface Todo {
@@ -814,6 +815,7 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [drawingTask, setDrawingTask] = useState<number | null>(null);
+  const [expandedTab, setExpandedTab] = useState<Record<number, "details" | "effort">>({});
 
   useEffect(() => {
     const handler = () => {
@@ -1204,7 +1206,7 @@ const App = () => {
     setTodo(prev => {
       const task = prev.find(t => t.id === id);
       if (!task || id < 0) return prev; // skip if task not yet saved to DB
-      const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false };
+      const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false, effort: null };
       const newSubtasks = [...task.subtasks, newSubtask];
       supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
       return prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t);
@@ -1226,6 +1228,16 @@ const App = () => {
       const task = prev.find(t => t.id === taskId);
       if (!task) return prev;
       const newSubtasks = task.subtasks.filter(s => s.id !== subtaskId);
+      supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
+      return prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t);
+    });
+  }, []);
+
+  const updateSubtaskEffort = useCallback((taskId: number, subtaskId: number, effort: number | null) => {
+    setTodo(prev => {
+      const task = prev.find(t => t.id === taskId);
+      if (!task) return prev;
+      const newSubtasks = task.subtasks.map(s => s.id === subtaskId ? { ...s, effort } : s);
       supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", taskId);
       return prev.map(t => t.id === taskId ? { ...t, subtasks: newSubtasks } : t);
     });
@@ -1833,151 +1845,193 @@ const App = () => {
                     </button>
                   </div>
 
-                  {/* expanded panel: notes + tags + subtasks */}
+                  {/* expanded panel */}
                   {expandedTask === t.id && (
-                    <div className="px-4 pb-3 space-y-2 bg-white/20 dark:bg-black/10 animate-slideIn">
-                      {/* notes */}
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Notes</label>
-                        <textarea
-                          value={t.notes}
-                          onChange={e => updateTaskNotes(t.id, e.target.value)}
-                          onKeyDown={e => e.stopPropagation()}
-                          placeholder="Add notes..."
-                          className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-3 py-2 border border-violet-200 dark:border-violet-700 text-gray-800 dark:text-gray-200 min-h-[60px] resize-none"
-                        />
+                    <div className="bg-white/20 dark:bg-black/10 animate-slideIn">
+                      {/* tab bar */}
+                      <div className="flex gap-1 px-4 pt-2">
+                        {(["details", "effort"] as const).map(tab => (
+                          <button key={tab} onClick={() => setExpandedTab(prev => ({ ...prev, [t.id]: tab }))}
+                            className={`text-xs px-3 py-1 rounded-lg font-semibold capitalize transition-all ${
+                              (expandedTab[t.id] ?? "details") === tab
+                                ? "bg-violet-500 text-white"
+                                : "text-gray-500 hover:text-violet-500 dark:text-gray-400"
+                            }`}>
+                            {tab === "effort" ? "⏱ Effort" : "📋 Details"}
+                          </button>
+                        ))}
                       </div>
 
-                      {/* tags */}
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Tags</label>
-                        <div className="flex flex-wrap gap-1">
-                          {t.tags.map(tag => (
-                            <span key={tag} className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 flex items-center gap-1">
-                              #{tag}
-                              <button onClick={() => removeTag(t.id, tag)} className="hover:text-red-500">
-                                <X size={10} />
-                              </button>
-                            </span>
-                          ))}
-                          <input
-                            type="text"
-                            placeholder="+ tag"
-                            onKeyDown={e => {
-                              e.stopPropagation();
-                              if (e.key === "Enter" && e.currentTarget.value.trim()) {
-                                addTag(t.id, e.currentTarget.value.trim());
-                                e.currentTarget.value = "";
-                              }
-                            }}
-                            className="text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1 border border-violet-200 dark:border-violet-700 w-20"
-                          />
-                        </div>
-                      </div>
-
-                      {/* subtasks */}
-                      <div>
-                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Subtasks</label>
-                        <div className="space-y-1">
-                          {t.subtasks.map(sub => (
-                            <div key={sub.id} className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={sub.completed}
-                                onChange={() => toggleSubtask(t.id, sub.id)}
-                                className="size-3.5 rounded border-2 border-violet-300 dark:border-violet-700 shrink-0 cursor-pointer"
-                              />
-                              <span className={`flex-1 text-xs ${sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"}`}>
-                                {sub.text}
-                              </span>
-                              <button onClick={() => deleteSubtask(t.id, sub.id)} className="text-gray-400 hover:text-red-400 shrink-0">
-                                <X size={12} />
-                              </button>
+                      {/* details tab */}
+                      {(expandedTab[t.id] ?? "details") === "details" && (
+                        <div className="px-4 pb-3 pt-2 space-y-2">
+                          {/* notes */}
+                          <div>
+                            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Notes</label>
+                            <textarea
+                              value={t.notes}
+                              onChange={e => updateTaskNotes(t.id, e.target.value)}
+                              onKeyDown={e => e.stopPropagation()}
+                              placeholder="Add notes..."
+                              className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-3 py-2 border border-violet-200 dark:border-violet-700 text-gray-800 dark:text-gray-200 min-h-[60px] resize-none"
+                            />
+                          </div>
+                          {/* tags */}
+                          <div>
+                            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Tags</label>
+                            <div className="flex flex-wrap gap-1">
+                              {t.tags.map(tag => (
+                                <span key={tag} className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 flex items-center gap-1">
+                                  #{tag}
+                                  <button onClick={() => removeTag(t.id, tag)} className="hover:text-red-500"><X size={10} /></button>
+                                </span>
+                              ))}
+                              <input type="text" placeholder="+ tag"
+                                onKeyDown={e => { e.stopPropagation(); if (e.key === "Enter" && e.currentTarget.value.trim()) { addTag(t.id, e.currentTarget.value.trim()); e.currentTarget.value = ""; } }}
+                                className="text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1 border border-violet-200 dark:border-violet-700 w-20" />
                             </div>
-                          ))}
-                          <input
-                            type="text"
-                            placeholder="+ Add subtask"
-                            onKeyDown={e => {
-                              e.stopPropagation();
-                              if (e.key === "Enter" && e.currentTarget.value.trim()) {
-                                addSubtask(t.id, e.currentTarget.value.trim());
-                                e.currentTarget.value = "";
-                              }
-                            }}
-                            className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1.5 border border-violet-200 dark:border-violet-700"
-                          />
-                        </div>
-                      </div>
-
-                      {/* pdf attachment */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">PDF Attachment</label>
-                          <div className="flex gap-1">
-                            <label className="text-xs px-2 py-1 rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/70 transition-all flex items-center gap-1 cursor-pointer">
-                              <Upload size={12} />
-                              {t.pdf ? "Replace" : "Upload PDF"}
-                              <input
-                                type="file" accept="application/pdf" className="hidden"
-                                onChange={e => { const f = e.target.files?.[0]; if (f) uploadPdf(t.id, f); e.target.value = ""; }}
-                              />
-                            </label>
+                          </div>
+                          {/* subtasks */}
+                          <div>
+                            <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 block">Subtasks</label>
+                            <div className="space-y-1">
+                              {t.subtasks.map(sub => (
+                                <div key={sub.id} className="flex items-center gap-2">
+                                  <input type="checkbox" checked={sub.completed} onChange={() => toggleSubtask(t.id, sub.id)}
+                                    className="size-3.5 rounded border-2 border-violet-300 dark:border-violet-700 shrink-0 cursor-pointer" />
+                                  <span className={`flex-1 text-xs ${sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"}`}>{sub.text}</span>
+                                  <button onClick={() => deleteSubtask(t.id, sub.id)} className="text-gray-400 hover:text-red-400 shrink-0"><X size={12} /></button>
+                                </div>
+                              ))}
+                              <input type="text" placeholder="+ Add subtask"
+                                onKeyDown={e => { e.stopPropagation(); if (e.key === "Enter" && e.currentTarget.value.trim()) { addSubtask(t.id, e.currentTarget.value.trim()); e.currentTarget.value = ""; } }}
+                                className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1.5 border border-violet-200 dark:border-violet-700" />
+                            </div>
+                          </div>
+                          {/* pdf */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">PDF Attachment</label>
+                              <div className="flex gap-1">
+                                <label className="text-xs px-2 py-1 rounded-lg bg-orange-100 text-orange-600 dark:bg-orange-900/50 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/70 transition-all flex items-center gap-1 cursor-pointer">
+                                  <Upload size={12} />{t.pdf ? "Replace" : "Upload PDF"}
+                                  <input type="file" accept="application/pdf" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadPdf(t.id, f); e.target.value = ""; }} />
+                                </label>
+                                {t.pdf && (
+                                  <button onClick={() => window.confirm("Delete this PDF?") && deletePdf(t.id, t.pdf!)}
+                                    className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1">
+                                    <Trash2 size={12} />Delete
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                             {t.pdf && (
-                              <button
-                                onClick={() => window.confirm("Delete this PDF?") && deletePdf(t.id, t.pdf!)}
-                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1"
-                              >
-                                <Trash2 size={12} />
-                                Delete
-                              </button>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400">
+                                  <FileText size={13} />
+                                  <a href={t.pdf} target="_blank" rel="noopener noreferrer" className="underline hover:text-orange-700 truncate">Open in new tab</a>
+                                </div>
+                                <embed src={t.pdf} type="application/pdf" className="w-full rounded-lg border border-orange-200 dark:border-orange-700" style={{ height: 400 }} />
+                              </div>
                             )}
                           </div>
-                        </div>
-                        {t.pdf && (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400">
-                              <FileText size={13} />
-                              <a href={t.pdf} target="_blank" rel="noopener noreferrer" className="underline hover:text-orange-700 truncate">
-                                Open in new tab
-                              </a>
+                          {/* canvas */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">Canvas Note</label>
+                              <div className="flex gap-1">
+                                <button onClick={() => setDrawingTask(t.id)}
+                                  className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/70 transition-all flex items-center gap-1">
+                                  <Pencil size={12} />{t.canvas ? "Edit" : "Draw"}
+                                </button>
+                                {t.canvas && (
+                                  <button onClick={async () => { if (window.confirm("Delete this canvas drawing?")) await updateTaskCanvas(t.id, null); }}
+                                    className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1">
+                                    <Trash2 size={12} />Delete
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            <embed src={t.pdf} type="application/pdf" className="w-full rounded-lg border border-orange-200 dark:border-orange-700" style={{ height: 400 }} />
-                          </div>
-                        )}
-                      </div>
-
-                      {/* canvas drawing */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-xs font-semibold text-gray-500 dark:text-gray-400">Canvas Note</label>
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => setDrawingTask(t.id)}
-                              className="text-xs px-2 py-1 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/70 transition-all flex items-center gap-1"
-                            >
-                              <Pencil size={12} />
-                              {t.canvas ? "Edit" : "Draw"}
-                            </button>
-                            {t.canvas && (
-                              <button
-                                onClick={async () => {
-                                  if (window.confirm('Delete this canvas drawing?')) {
-                                    await updateTaskCanvas(t.id, null);
-                                  }
-                                }}
-                                className="text-xs px-2 py-1 rounded-lg bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/70 transition-all flex items-center gap-1"
-                              >
-                                <Trash2 size={12} />
-                                Delete
-                              </button>
-                            )}
+                            {t.canvas && <img src={t.canvas} alt="Canvas note" className="w-full rounded-lg border border-violet-200 dark:border-violet-700" />}
                           </div>
                         </div>
-                        {t.canvas && (
-                          <img src={t.canvas} alt="Canvas note" className="w-full rounded-lg border border-violet-200 dark:border-violet-700" />
-                        )}
-                      </div>
+                      )}
+
+                      {/* effort tab */}
+                      {(expandedTab[t.id] ?? "details") === "effort" && (() => {
+                        const subtaskTotal = t.subtasks.reduce((a, s) => a + (s.effort ?? 0), 0);
+                        const estimate = t.estimate ?? 0;
+                        const pct = estimate > 0 ? Math.min(100, Math.round((subtaskTotal / estimate) * 100)) : 0;
+                        const over = subtaskTotal > estimate && estimate > 0;
+                        const fmt = (m: number) => m >= 60 ? `${Math.floor(m/60)}h ${m%60 > 0 ? `${m%60}m` : ""}`.trim() : `${m}m`;
+                        return (
+                          <div className="px-4 pb-3 pt-2 space-y-3">
+                            {/* summary */}
+                            <div className="glass rounded-xl p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Effort Breakdown</span>
+                                {estimate > 0 && (
+                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                                    over ? "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400"
+                                    : "bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400"
+                                  }`}>
+                                    {over ? "Over estimate" : `${pct}% of estimate`}
+                                  </span>
+                                )}
+                              </div>
+                              {estimate > 0 && (
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400">
+                                    <span>Subtasks: <b className="text-gray-700 dark:text-gray-200">{fmt(subtaskTotal)}</b></span>
+                                    <span>Estimate: <b className="text-gray-700 dark:text-gray-200">{fmt(estimate)}</b></span>
+                                  </div>
+                                  <div className="h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${
+                                      over ? "bg-red-400" : "bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                                    }`} style={{ width: `${Math.min(100, pct)}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex gap-3 flex-wrap">
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300 font-semibold">
+                                  Total subtask effort: {subtaskTotal > 0 ? fmt(subtaskTotal) : "—"}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300 font-semibold">
+                                  Task estimate: {estimate > 0 ? fmt(estimate) : "not set"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* per-subtask effort */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block">Subtask Efforts</label>
+                              {t.subtasks.length === 0 && (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">No subtasks yet — add them in the Details tab.</p>
+                              )}
+                              {t.subtasks.map(sub => (
+                                <div key={sub.id} className="flex items-center gap-2 bg-white/40 dark:bg-white/5 rounded-lg px-3 py-1.5">
+                                  <span className={`flex-1 text-xs truncate ${
+                                    sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"
+                                  }`}>{sub.text}</span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <input
+                                      type="number" min="0" max="999" placeholder="min"
+                                      value={sub.effort ?? ""}
+                                      onKeyDown={e => e.stopPropagation()}
+                                      onChange={e => updateSubtaskEffort(t.id, sub.id, e.target.value ? Number(e.target.value) : null)}
+                                      className="w-16 text-xs bg-white/60 dark:bg-white/10 rounded px-2 py-1 border border-violet-200 dark:border-violet-700 text-center"
+                                    />
+                                    <span className="text-[10px] text-gray-400">min</span>
+                                    {sub.effort != null && sub.effort >= 60 && (
+                                      <span className="text-[10px] text-violet-500 font-medium">{fmt(sub.effort)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
