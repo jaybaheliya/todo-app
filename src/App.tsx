@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload, FileText, Copy, Calculator, LayoutList } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload, FileText } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -10,7 +10,6 @@ import type { User } from "@supabase/supabase-js";
 
 type Priority = "high" | "medium" | "low";
 type SortBy = "created" | "deadline" | "priority" | "alphabetical" | "elapsed";
-type AppView = "tracker" | "estimation";
 
 interface Subtask {
   id: number;
@@ -50,89 +49,6 @@ interface Toast {
 interface UndoAction {
   type: "delete" | "complete" | "bulkDelete";
   data: Todo | Todo[];
-}
-
-interface EstimationItem {
-  id: number;
-  project: string;
-  task: string;
-  subtask: string;
-  hours: string;
-}
-
-function createEstimationItem(existingIds: number[] = []): EstimationItem {
-  return { id: getNextIntId(existingIds), project: "", task: "", subtask: "", hours: "" };
-}
-
-function getNextIntId(values: number[]): number {
-  const max = values.reduce((currentMax, value) => (value > currentMax ? value : currentMax), 0);
-  return max + 1;
-}
-
-function formatHours(hours: number): string {
-  return hours.toFixed(2);
-}
-
-function buildEstimationCopy(items: EstimationItem[]): string {
-  const normalized = items
-    .map(item => ({
-      ...item,
-      project: item.project.trim(),
-      task: item.task.trim(),
-      subtask: item.subtask.trim(),
-      hours: Number(item.hours) || 0,
-    }))
-    .filter(item => item.project || item.task || item.subtask || item.hours > 0);
-
-  if (normalized.length === 0) {
-    return "Effort Estimation\nNo estimates added yet.";
-  }
-
-  const projectMap = new Map<string, Map<string, { hours: number; subtasks: { name: string; hours: number }[] }>>();
-
-  normalized.forEach(item => {
-    const projectName = item.project || "General";
-    const taskName = item.task || "General Task";
-    const subtaskName = item.subtask || "";
-    const projectTasks = projectMap.get(projectName) ?? new Map<string, { hours: number; subtasks: { name: string; hours: number }[] }>();
-    const taskEntry = projectTasks.get(taskName) ?? { hours: 0, subtasks: [] };
-
-    if (subtaskName) {
-      taskEntry.subtasks.push({ name: subtaskName, hours: item.hours });
-    } else {
-      taskEntry.hours += item.hours;
-    }
-
-    projectTasks.set(taskName, taskEntry);
-    projectMap.set(projectName, projectTasks);
-  });
-
-  const lines: string[] = ["Effort Estimation", ""];
-  let total = 0;
-
-  projectMap.forEach((tasks, projectName) => {
-    let projectTotal = 0;
-    tasks.forEach(task => {
-      projectTotal += task.hours + task.subtasks.reduce((sum, subtask) => sum + subtask.hours, 0);
-    });
-
-    total += projectTotal;
-    lines.push(`Project: ${projectName} (${formatHours(projectTotal)}h)`);
-
-    tasks.forEach((task, taskName) => {
-      const taskTotal = task.hours + task.subtasks.reduce((sum, subtask) => sum + subtask.hours, 0);
-      lines.push(`- Task: ${taskName} (${formatHours(taskTotal)}h)`);
-
-      task.subtasks.forEach(subtask => {
-        lines.push(`  - Subtask: ${subtask.name} (${formatHours(subtask.hours)}h)`);
-      });
-    });
-
-    lines.push("");
-  });
-
-  lines.push(`Total Effort: ${formatHours(total)} hours`);
-  return lines.join("\n");
 }
 
 /* ── Auth gate ── */
@@ -868,7 +784,6 @@ const tabs = ["All", "Active", "Completed"];
 const App = () => {
   const [user, setUser]         = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [appView, setAppView] = useState<AppView>("tracker");
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");
   const [showOptions, setShowOptions] = useState(false);
@@ -899,8 +814,6 @@ const App = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const [drawingTask, setDrawingTask] = useState<number | null>(null);
-  const [estimationItems, setEstimationItems] = useState<EstimationItem[]>(() => [createEstimationItem([])]);
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
 
   useEffect(() => {
     const handler = () => {
@@ -973,26 +886,6 @@ const App = () => {
     });
   }, [user]);
 
-  useEffect(() => {
-    if (!user) return;
-    const raw = window.localStorage.getItem(`effort-estimation:${user.id}`);
-    if (!raw) return;
-
-    try {
-      const parsed = JSON.parse(raw) as EstimationItem[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setEstimationItems(parsed);
-      }
-    } catch (error) {
-      console.error("Failed to load effort estimation:", error);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    window.localStorage.setItem(`effort-estimation:${user.id}`, JSON.stringify(estimationItems));
-  }, [estimationItems, user]);
-
   /* request notification permission once */
   useEffect(() => {
     if ("Notification" in window) {
@@ -1032,8 +925,7 @@ const App = () => {
 
   const addProject = useCallback(async (name: string, color: string, parentId: number | null) => {
     if (!user) return;
-    const nextProjectId = getNextIntId(projects.map(project => project.id));
-    const p: Project = { id: nextProjectId, name, color, parentId, collapsed: false };
+    const p: Project = { id: Date.now(), name, color, parentId, collapsed: false };
     setProjects(prev => [...prev, p]);
     const { error } = await supabase.from("projects").insert({ id: p.id, user_id: user.id, name, color, parent_id: parentId, collapsed: false });
     if (error) {
@@ -1074,9 +966,8 @@ const App = () => {
     const dl  = deadline ? new Date(deadline).getTime() : null;
     const est = estimate ? parseInt(estimate) : null;
     const maxOrder = todo.length > 0 ? Math.max(...todo.map(t => t.order)) : 0;
-    const nextTodoId = getNextIntId(todo.map(task => task.id));
     const newTodo: Todo = {
-      id: nextTodoId, text: input.trim(), completed: false,
+      id: now, text: input.trim(), completed: false,
       createdAt: now, startedAt: now, completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
@@ -1310,11 +1201,7 @@ const App = () => {
     setTodo(prev => {
       const task = prev.find(t => t.id === id);
       if (!task) return prev;
-      const newSubtask: Subtask = {
-        id: getNextIntId(task.subtasks.map(subtask => subtask.id)),
-        text: text.trim(),
-        completed: false,
-      };
+      const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false };
       const newSubtasks = [...task.subtasks, newSubtask];
       supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
       return prev.map(t => t.id === id ? { ...t, subtasks: newSubtasks } : t);
@@ -1376,10 +1263,9 @@ const App = () => {
           if (!b.deadline) return -1;
           return a.deadline - b.deadline;
         });
-      case "priority": {
+      case "priority":
         const prio = { high: 0, medium: 1, low: 2 };
         return arr.sort((a, b) => prio[a.priority] - prio[b.priority]);
-      }
       case "alphabetical":
         return arr.sort((a, b) => a.text.localeCompare(b.text));
       case "elapsed":
@@ -1421,80 +1307,6 @@ const App = () => {
     return acc + ms;
   }, 0);
 
-  const estimationProjectOptions = useMemo(
-    () => Array.from(new Set(projects.map(project => project.name.trim()).filter(Boolean))),
-    [projects]
-  );
-
-  const estimationSummary = useMemo(() => {
-    const projectMap = new Map<string, Map<string, { ownHours: number; subtasks: { id: number; name: string; hours: number }[] }>>();
-
-    estimationItems.forEach(item => {
-      const hours = Number(item.hours);
-      const projectName = item.project.trim() || "General";
-      const taskName = item.task.trim() || "General Task";
-      const subtaskName = item.subtask.trim();
-
-      if (!projectMap.has(projectName)) {
-        projectMap.set(projectName, new Map());
-      }
-
-      const tasks = projectMap.get(projectName)!;
-      const taskEntry = tasks.get(taskName) ?? { ownHours: 0, subtasks: [] };
-
-      if (subtaskName) {
-        taskEntry.subtasks.push({
-          id: item.id,
-          name: subtaskName,
-          hours: Number.isFinite(hours) ? hours : 0,
-        });
-      } else {
-        taskEntry.ownHours += Number.isFinite(hours) ? hours : 0;
-      }
-
-      tasks.set(taskName, taskEntry);
-    });
-
-    return Array.from(projectMap.entries()).map(([projectName, tasks]) => {
-      const taskEntries = Array.from(tasks.entries()).map(([taskName, task]) => {
-        const totalHours = task.ownHours + task.subtasks.reduce((sum, subtask) => sum + subtask.hours, 0);
-        return { taskName, ...task, totalHours };
-      });
-
-      const totalHours = taskEntries.reduce((sum, task) => sum + task.totalHours, 0);
-      return { projectName, tasks: taskEntries, totalHours };
-    });
-  }, [estimationItems]);
-
-  const totalEstimatedHours = useMemo(
-    () => estimationItems.reduce((sum, item) => sum + (Number(item.hours) || 0), 0),
-    [estimationItems]
-  );
-
-  const addEstimationRow = () => {
-    setEstimationItems(prev => [...prev, createEstimationItem(prev.map(item => item.id))]);
-  };
-
-  const updateEstimationRow = (id: number, field: keyof Omit<EstimationItem, "id">, value: string) => {
-    setEstimationItems(prev => prev.map(item => (item.id === id ? { ...item, [field]: value } : item)));
-    setCopyStatus("idle");
-  };
-
-  const removeEstimationRow = (id: number) => {
-    setEstimationItems(prev => (prev.length === 1 ? [createEstimationItem([])] : prev.filter(item => item.id !== id)));
-    setCopyStatus("idle");
-  };
-
-  const copyEstimation = async () => {
-    try {
-      await navigator.clipboard.writeText(buildEstimationCopy(estimationItems));
-      setCopyStatus("copied");
-    } catch (error) {
-      console.error("Failed to copy effort estimation:", error);
-      setCopyStatus("error");
-    }
-  };
-
   /* keyboard shortcuts */
   useEffect(() => { 
     const handler = (e: KeyboardEvent) => {
@@ -1519,12 +1331,6 @@ const App = () => {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [performUndo]);
-
-  useEffect(() => {
-    if (copyStatus === "idle") return;
-    const timeout = window.setTimeout(() => setCopyStatus("idle"), 2200);
-    return () => window.clearTimeout(timeout);
-  }, [copyStatus]);
 
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
@@ -1576,7 +1382,7 @@ const App = () => {
       </div>
 
       {/* ── Mobile sidebar overlay ── */}
-      {appView === "tracker" && isMobile && sidebarOpen && (
+      {isMobile && sidebarOpen && (
         <div className="fixed inset-0 z-40 flex">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
           <div className="relative z-50 w-64 max-w-[80vw] h-full overflow-y-auto p-4">
@@ -1632,7 +1438,7 @@ const App = () => {
         <div className="max-w-6xl w-full mx-auto flex gap-5 items-start">
 
           {/* desktop sidebar */}
-          {appView === "tracker" && !isMobile && (
+          {!isMobile && (
             <div className={`shrink-0 transition-all duration-300 overflow-hidden ${sidebarOpen ? "w-56" : "w-0"}`}>
               <ProjectSidebar
                 projects={projects} selectedId={selectedProject}
@@ -1645,32 +1451,6 @@ const App = () => {
           )}
 
           <div className="flex-1 min-w-0 space-y-4">
-          <div className="glass rounded-2xl p-1.5 flex gap-1.5">
-            <button
-              onClick={() => setAppView("tracker")}
-              className={`flex-1 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-                appView === "tracker"
-                  ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-md shadow-violet-500/30"
-                  : "text-gray-600 dark:text-gray-300 hover:bg-white/50 dark:hover:bg-white/5"
-              }`}
-            >
-              <LayoutList size={16} />
-              Time Tracker
-            </button>
-            <button
-              onClick={() => setAppView("estimation")}
-              className={`flex-1 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
-                appView === "estimation"
-                  ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-md shadow-violet-500/30"
-                  : "text-gray-600 dark:text-gray-300 hover:bg-white/50 dark:hover:bg-white/5"
-              }`}
-            >
-              <Calculator size={16} />
-              Effort Estimation
-            </button>
-          </div>
-          {appView === "tracker" ? (
-            <>
           {/* sidebar toggle button */}
           <button onClick={() => setSidebarOpen(s => !s)}
             className="flex items-center gap-1.5 text-xs text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
@@ -2214,148 +1994,6 @@ const App = () => {
               </div>
             )}
           </div>
-            </>
-          ) : (
-            <>
-              <div className="glass rounded-2xl p-5 sm:p-6 space-y-5">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Effort Estimation</h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Plan work in a hierarchy like project &gt; task &gt; subtask, then copy it in a clean format.
-                    </p>
-                  </div>
-                  <div className="text-left sm:text-right">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Total Efforts</p>
-                    <p className="text-2xl font-semibold text-violet-600 dark:text-violet-300">{formatHours(totalEstimatedHours)} hours</p>
-                  </div>
-                </div>
-
-                <datalist id="project-options">
-                  {estimationProjectOptions.map(projectName => (
-                    <option key={projectName} value={projectName} />
-                  ))}
-                </datalist>
-
-                <div className="space-y-3">
-                  {estimationItems.map((item, index) => (
-                    <div key={item.id} className="rounded-2xl border border-violet-100/80 dark:border-violet-800/40 bg-white/40 dark:bg-white/5 p-3 sm:p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-500 dark:text-violet-300">Estimate {index + 1}</p>
-                        <button
-                          onClick={() => removeEstimationRow(item.id)}
-                          className="size-8 flex items-center justify-center rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
-                          title="Remove row"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-[1.1fr_1.1fr_1.1fr_120px]">
-                        <input
-                          list="project-options"
-                          type="text"
-                          value={item.project}
-                          onChange={e => updateEstimationRow(item.id, "project", e.target.value)}
-                          placeholder="Project name"
-                          className="w-full rounded-xl border border-violet-200 dark:border-violet-700 bg-white/70 dark:bg-white/10 px-3 py-2.5 text-sm"
-                        />
-                        <input
-                          type="text"
-                          value={item.task}
-                          onChange={e => updateEstimationRow(item.id, "task", e.target.value)}
-                          placeholder="Task name"
-                          className="w-full rounded-xl border border-violet-200 dark:border-violet-700 bg-white/70 dark:bg-white/10 px-3 py-2.5 text-sm"
-                        />
-                        <input
-                          type="text"
-                          value={item.subtask}
-                          onChange={e => updateEstimationRow(item.id, "subtask", e.target.value)}
-                          placeholder="Subtask name"
-                          className="w-full rounded-xl border border-violet-200 dark:border-violet-700 bg-white/70 dark:bg-white/10 px-3 py-2.5 text-sm"
-                        />
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.25"
-                          value={item.hours}
-                          onChange={e => updateEstimationRow(item.id, "hours", e.target.value)}
-                          placeholder="Hours"
-                          className="w-full rounded-xl border border-violet-200 dark:border-violet-700 bg-white/70 dark:bg-white/10 px-3 py-2.5 text-sm"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    onClick={addEstimationRow}
-                    className="inline-flex items-center gap-2 rounded-xl bg-green-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-600 transition-all"
-                  >
-                    <Plus size={16} />
-                    Add Estimate Row
-                  </button>
-                  <button
-                    onClick={copyEstimation}
-                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-violet-500/20 hover:from-violet-600 hover:to-fuchsia-600 transition-all"
-                  >
-                    <Copy size={16} />
-                    {copyStatus === "copied" ? "Copied" : "Copy Estimation"}
-                  </button>
-                  <span className={`text-sm ${copyStatus === "error" ? "text-red-500" : "text-gray-500 dark:text-gray-400"}`}>
-                    {copyStatus === "copied" ? "Copied in a clean hierarchy format." : copyStatus === "error" ? "Clipboard copy failed." : "Use the copy CTA to export all estimates."}
-                  </span>
-                </div>
-              </div>
-
-              <div className="glass rounded-2xl p-5 sm:p-6 space-y-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Estimation Preview</h3>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">{estimationSummary.length} project group{estimationSummary.length === 1 ? "" : "s"}</span>
-                </div>
-
-                {estimationSummary.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-violet-200 dark:border-violet-700/50 px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
-                    Add project, task, subtask, and hours to start estimating.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {estimationSummary.map(project => (
-                      <div key={project.projectName} className="rounded-2xl border border-violet-100/80 dark:border-violet-800/40 bg-white/30 dark:bg-white/5 p-4 space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <FolderOpen size={16} className="text-violet-500" />
-                            <h4 className="font-semibold text-gray-900 dark:text-white">{project.projectName}</h4>
-                          </div>
-                          <span className="text-sm font-medium text-violet-600 dark:text-violet-300">{formatHours(project.totalHours)}h</span>
-                        </div>
-                        <div className="space-y-3">
-                          {project.tasks.map(task => (
-                            <div key={`${project.projectName}-${task.taskName}`} className="rounded-xl bg-white/50 dark:bg-black/10 px-3 py-3">
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <p className="font-medium text-gray-800 dark:text-gray-100">{task.taskName}</p>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">{formatHours(task.totalHours)}h</span>
-                              </div>
-                              {task.subtasks.length > 0 && (
-                                <div className="mt-3 space-y-2 border-l border-violet-200 dark:border-violet-700/50 pl-3">
-                                  {task.subtasks.map(subtask => (
-                                    <div key={subtask.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                                      <p className="text-gray-600 dark:text-gray-300">{subtask.name}</p>
-                                      <span className="text-gray-500 dark:text-gray-400">{formatHours(subtask.hours)}h</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
           </div>{/* end flex-1 */}
         </div>{/* end flex gap-5 */}
       </main>
