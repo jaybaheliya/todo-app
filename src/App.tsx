@@ -1,4 +1,4 @@
-import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload, FileText } from "lucide-react";
+import { Sparkle, Plus, Check, Trash2, Circle, Timer, Bell, BellOff, BarChart2, X, Clock, LogOut, Pause, Play, Flag, FolderOpen, PanelLeftClose, PanelLeftOpen, Search, ArrowUpDown, Tag, ChevronDown, ChevronUp, Save, CheckSquare, Pencil, Eraser, Type, Upload, FileText, Copy, Zap } from "lucide-react";
 import { ToggleTheme } from "./components/ToggleTheme";
 import ProjectSidebar from "./components/ProjectSidebar";
 import type { Project } from "./components/ProjectSidebar";
@@ -10,6 +10,7 @@ import type { User } from "@supabase/supabase-js";
 
 type Priority = "high" | "medium" | "low";
 type SortBy = "created" | "deadline" | "priority" | "alphabetical" | "elapsed";
+type EffortSize = "XS" | "S" | "M" | "L" | "XL";
 
 interface Subtask {
   id: number;
@@ -29,6 +30,7 @@ interface Todo {
   notified: boolean;
   priority: Priority;
   estimate: number | null;
+  effort: EffortSize | null;
   paused: boolean;
   projectId: number | null;
   emoji: string | null;
@@ -861,6 +863,7 @@ const App = () => {
           notified: Boolean(r.notified),
           priority: (["high","medium","low"].includes(r.priority) ? r.priority : "medium") as Priority,
           estimate: r.estimate != null ? Number(r.estimate) : null,
+          effort: (["XS","S","M","L","XL"].includes(r.effort) ? r.effort : null) as EffortSize | null,
           paused: Boolean(r.paused),
           projectId: r.project_id != null ? Number(r.project_id) : null,
           emoji: r.emoji ?? null,
@@ -970,7 +973,7 @@ const App = () => {
       id: now, text: input.trim(), completed: false,
       createdAt: now, startedAt: now, completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
-      priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
+      priority, estimate: est, effort: null, paused: false, projectId: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: maxOrder + 1,
       canvas: null, pdf: null,
     };
@@ -980,7 +983,7 @@ const App = () => {
       id: newTodo.id, user_id: user.id, text: newTodo.text, completed: false,
       created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
-      priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
+      priority, estimate: est, effort: null, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
       canvas: null, pdf: null,
     });
@@ -1105,7 +1108,7 @@ const App = () => {
     id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
     created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
     elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
-    priority: task.priority, estimate: task.estimate, paused: task.paused,
+    priority: task.priority, estimate: task.estimate, effort: task.effort, paused: task.paused,
     project_id: task.projectId, emoji: task.emoji, notes: task.notes,
     tags: task.tags, subtasks: task.subtasks, order: task.order,
     canvas: task.canvas, pdf: task.pdf,
@@ -1128,6 +1131,12 @@ const App = () => {
     setTodo(prev => prev.map(t => t.id === id ? { ...t, text: text.trim() } : t));
     const { error } = await supabase.from("todos").update({ text: text.trim() }).eq("id", id);
     if (error) console.error("updateTaskText error:", error);
+  }, []);
+
+  const updateTaskEffort = useCallback(async (id: number, effort: EffortSize | null) => {
+    setTodo(prev => prev.map(t => t.id === id ? { ...t, effort } : t));
+    const { error } = await supabase.from("todos").update({ effort }).eq("id", id);
+    if (error) console.error("updateTaskEffort error:", error);
   }, []);
 
   const updateTaskNotes = useCallback(async (id: number, notes: string) => {
@@ -1283,6 +1292,31 @@ const App = () => {
       default: return sortedTodo;
     }
   }, [activeTab, sortedTodo]);
+
+  const copyAllTasks = useCallback(() => {
+    const projectMap = new Map(projects.map(p => [p.id, p]));
+    const getPath = (projectId: number | null): string => {
+      if (!projectId) return "";
+      const path: string[] = [];
+      let cur = projectMap.get(projectId);
+      while (cur) { path.unshift(cur.name); cur = cur.parentId ? projectMap.get(cur.parentId) : undefined; }
+      return path.join(" > ");
+    };
+    const lines: string[] = [];
+    filterTodo.forEach(t => {
+      const status = t.completed ? "✅" : t.paused ? "⏸" : "🔄";
+      const path = getPath(t.projectId);
+      const effort = t.effort ? ` | Effort: ${t.effort}` : "";
+      const est = t.estimate ? ` | Est: ${t.estimate}m` : "";
+      const tags = t.tags.length ? ` | ${t.tags.map(g => `#${g}`).join(" ")}` : "";
+      lines.push(`${status} ${path ? `[${path}] ` : ""}${t.text} | ${t.priority}${effort}${est}${tags}`);
+      if (t.notes.trim()) lines.push(`   📝 ${t.notes.trim()}`);
+      t.subtasks.forEach(s => lines.push(`   ${s.completed ? "☑" : "☐"} ${s.text}`));
+    });
+    navigator.clipboard.writeText(lines.join("\n")).then(() =>
+      setToasts(ts => [...ts, { id: ++toastCounter.current, text: `Copied ${filterTodo.length} tasks to clipboard!`, type: "done" }])
+    );
+  }, [filterTodo, projects]);
 
   const taskCounts = useMemo(() => {
     const map: Record<number, number> = {};
@@ -1783,6 +1817,11 @@ const App = () => {
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-0.5 shrink-0 ${PRIORITY_STYLES[t.priority]}`}>
                           <Flag size={8} />{t.priority}
                         </span>
+                        {t.effort && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 flex items-center gap-0.5">
+                            <Zap size={8} />{t.effort}
+                          </span>
+                        )}
                         {t.tags.map(tag => (
                           <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/50 dark:text-violet-300 font-medium shrink-0">
                             #{tag}
@@ -1867,6 +1906,53 @@ const App = () => {
                             }}
                             className="text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1 border border-violet-200 dark:border-violet-700 w-20"
                           />
+                        </div>
+                      </div>
+
+                      {/* effort estimation */}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
+                          <Zap size={11} className="text-amber-500" />Effort Estimation
+                        </label>
+                        {(() => {
+                          const path: string[] = [];
+                          let cur = projects.find(p => p.id === t.projectId);
+                          while (cur) { path.unshift(cur.name); cur = cur.parentId ? projects.find(p => p.id === cur!.parentId) : undefined; }
+                          path.push(t.text);
+                          return path.length > 1 ? (
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-1.5 truncate">
+                              {path.map((seg, i) => (
+                                <span key={i}>
+                                  {i > 0 && <span className="mx-1 opacity-40">›</span>}
+                                  <span className={i === path.length - 1 ? "text-violet-500 font-medium" : ""}>{seg}</span>
+                                </span>
+                              ))}
+                            </p>
+                          ) : null;
+                        })()}
+                        <div className="flex gap-1.5 flex-wrap">
+                          {(["XS","S","M","L","XL"] as EffortSize[]).map(size => {
+                            const labels: Record<EffortSize,string> = { XS:"~15m", S:"~1h", M:"~4h", L:"~1d", XL:"2d+" };
+                            const colors: Record<EffortSize,string> = {
+                              XS: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+                              S:  "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+                              M:  "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+                              L:  "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+                              XL: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+                            };
+                            const active = t.effort === size;
+                            return (
+                              <button key={size}
+                                onClick={() => updateTaskEffort(t.id, active ? null : size)}
+                                className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                                  active ? colors[size] + " ring-1 ring-current" : "bg-white/40 dark:bg-white/5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                }`}
+                                title={labels[size]}
+                              >
+                                {size} <span className="opacity-60 font-normal">{labels[size]}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -1985,12 +2071,21 @@ const App = () => {
                   <span>{remaining} remaining · {completed} done · {formatDuration(totalTracked)} tracked</span>
                   <span className="text-gray-400">· Press <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">N</kbd> new task · <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">/</kbd> search · <kbd className="px-1.5 py-0.5 rounded bg-white/40 dark:bg-white/10 font-mono text-[10px]">Ctrl+Z</kbd> undo</span>
                 </div>
-                {completed > 0 && (
-                  <button onClick={clearCompleted}
-                    className="text-xs font-medium text-red-500 hover:text-red-600 dark:text-red-400 hover:underline transition-colors">
-                    Clear completed
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={copyAllTasks}
+                    className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-900/60 transition-all"
+                    title="Copy all visible tasks"
+                  >
+                    <Copy size={12} />Copy
                   </button>
-                )}
+                  {completed > 0 && (
+                    <button onClick={clearCompleted}
+                      className="text-xs font-medium text-red-500 hover:text-red-600 dark:text-red-400 hover:underline transition-colors">
+                      Clear completed
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
