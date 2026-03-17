@@ -8,6 +8,11 @@ import type { User } from "@supabase/supabase-js";
 
 // Krishiv@2026
 
+// ── DEV ONLY: Skip login for local development ──────────────────────────────
+// To re-enable login, comment out the next line (set to false or remove it)
+const DEV_SKIP_LOGIN = true;
+// ─────────────────────────────────────────────────────────────────────────────
+
 type Priority = "high" | "medium" | "low";
 type SortBy = "created" | "deadline" | "priority" | "alphabetical" | "elapsed";
 
@@ -782,7 +787,8 @@ function DrawingCanvas({ initialData, onSave, onClose }: { initialData: string |
 const tabs = ["All", "Active", "Completed"];
 
 const App = () => {
-  const [user, setUser]         = useState<User | null>(null);
+  // DEV_SKIP_LOGIN: fake user so Supabase calls don't fail — comment this line and restore the one below when done
+  const [user, setUser]         = useState<User | null>(DEV_SKIP_LOGIN ? { id: "dev-local", email: "dev@local" } as unknown as User : null);
   const [authReady, setAuthReady] = useState(false);
   const [input, setInput]       = useState("");
   const [deadline, setDeadline] = useState("");
@@ -1334,8 +1340,9 @@ const App = () => {
 
   const minDT = new Date(Date.now() + 60000).toISOString().slice(0, 16);
 
-  if (!authReady) return null;
-  if (!user) return <AuthGate onLogin={setUser} />;
+  if (!authReady && !DEV_SKIP_LOGIN) return null;
+  // DEV_SKIP_LOGIN: comment out the next line to restore normal login flow
+  if (!user && !DEV_SKIP_LOGIN) return <AuthGate onLogin={setUser} />;
 
   const activeProject = projects.find(p => p.id === selectedProject);
   const currentYear = new Date().getFullYear();
