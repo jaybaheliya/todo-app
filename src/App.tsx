@@ -79,7 +79,7 @@ function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
     if (!email.trim()) return;
     setLoading(true); setError("");
     const { error: err } = await supabase.auth.signInWithOtp({
-      email, options: { emailRedirectTo: window.location.origin },
+      email, options: { emailRedirectTo: "https://jb-taskmanager.vercel.app" },
     });
     if (err) setError(err.message);
     else setSent(true);
@@ -966,11 +966,12 @@ const App = () => {
   const addTodo = useCallback(async () => {
     if (!input.trim() || !user) return;
     const now = Date.now();
+    const tempId = -now; // negative so it never collides with a real DB id
     const dl  = deadline ? new Date(deadline).getTime() : null;
     const est = estimate ? parseInt(estimate) : null;
     const maxOrder = todo.length > 0 ? Math.max(...todo.map(t => t.order)) : 0;
     const newTodo: Todo = {
-      id: now, text: input.trim(), completed: false,
+      id: tempId, text: input.trim(), completed: false,
       createdAt: now, startedAt: now, completedAt: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, projectId: selectedProject, emoji: taskEmoji,
@@ -981,7 +982,7 @@ const App = () => {
     setInput(""); setDeadline(""); setShowOptions(false); setEstimate(""); setPriority("medium"); setTaskEmoji(null);
     const { data: inserted, error: insertErr } = await supabase.from("todos").insert({
       user_id: user.id, text: newTodo.text, completed: false,
-      created_at: newTodo.createdAt, started_at: newTodo.startedAt, completed_at: null,
+      created_at: now, started_at: now, completed_at: null,
       elapsed: 0, deadline: dl, notified: false,
       priority, estimate: est, paused: false, project_id: selectedProject, emoji: taskEmoji,
       notes: "", tags: [], subtasks: [], order: newTodo.order,
@@ -989,11 +990,10 @@ const App = () => {
     }).select("id").single();
     if (insertErr) {
       console.error("addTodo error:", insertErr);
-      setTodo(prev => prev.filter(t => t.id !== newTodo.id));
+      setTodo(prev => prev.filter(t => t.id !== tempId));
       setToasts(ts => [...ts, { id: ++toastCounter.current, text: "Failed to save task: " + insertErr.message, type: "overdue" }]);
     } else if (inserted) {
-      // Replace the temp client-side id with the real DB-generated id
-      setTodo(prev => prev.map(t => t.id === newTodo.id ? { ...t, id: inserted.id } : t));
+      setTodo(prev => prev.map(t => t.id === tempId ? { ...t, id: inserted.id } : t));
     }
   }, [input, deadline, estimate, priority, user, selectedProject, taskEmoji, todo]);
 
