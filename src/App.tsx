@@ -1106,27 +1106,25 @@ const App = () => {
     }
   }, [selectedTasks]);
 
-  const toDbRow = useCallback((task: Todo) => ({
-    id: task.id, user_id: user!.id, text: task.text, completed: task.completed,
-    created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
-    elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
-    priority: task.priority, estimate: task.estimate, paused: task.paused,
-    project_id: task.projectId, emoji: task.emoji, notes: task.notes,
-    tags: task.tags, subtasks: task.subtasks, order: task.order,
-    canvas: task.canvas, pdf: task.pdf,
-  }), [user]);
-
   const performUndo = useCallback(async () => {
     if (!undoStack || !user) return;
     const tasks = undoStack.type === "delete" ? [undoStack.data as Todo] : undoStack.data as Todo[];
-    setTodo(prev => [...prev, ...tasks]);
     for (const task of tasks) {
-      const { error } = await supabase.from("todos").insert(toDbRow(task));
-      if (error) console.error("undo insert error:", error);
+      const { data: inserted, error } = await supabase.from("todos").insert({
+        user_id: user.id, text: task.text, completed: task.completed,
+        created_at: task.createdAt, started_at: task.startedAt, completed_at: task.completedAt,
+        elapsed: task.elapsed, deadline: task.deadline, notified: task.notified,
+        priority: task.priority, estimate: task.estimate, paused: task.paused,
+        project_id: task.projectId, emoji: task.emoji, notes: task.notes,
+        tags: task.tags, subtasks: task.subtasks, order: task.order,
+        canvas: task.canvas, pdf: task.pdf,
+      }).select("id").single();
+      if (error) { console.error("undo insert error:", error); return; }
+      if (inserted) setTodo(prev => [...prev, { ...task, id: inserted.id }]);
     }
     setUndoStack(null);
     setToasts(ts => ts.filter(t => t.type !== "undo"));
-  }, [undoStack, user, toDbRow]);
+  }, [undoStack, user]);
 
   const updateTaskText = useCallback(async (id: number, text: string) => {
     if (!text.trim()) return;
@@ -1205,7 +1203,7 @@ const App = () => {
     if (!text.trim()) return;
     setTodo(prev => {
       const task = prev.find(t => t.id === id);
-      if (!task) return prev;
+      if (!task || id < 0) return prev; // skip if task not yet saved to DB
       const newSubtask: Subtask = { id: Date.now(), text: text.trim(), completed: false };
       const newSubtasks = [...task.subtasks, newSubtask];
       supabase.from("todos").update({ subtasks: newSubtasks }).eq("id", id);
