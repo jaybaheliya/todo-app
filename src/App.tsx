@@ -68,9 +68,9 @@ function AuthGate({ onLogin }: { onLogin: (user: User) => void }) {
     return () => subscription.unsubscribe();
   }, [onLogin]);
 
-  /* clear any error hash from the URL on mount */
+  /* clear any error/token hash from the URL on mount */
   useEffect(() => {
-    if (window.location.hash.includes("error")) {
+    if (window.location.hash) {
       history.replaceState(null, "", window.location.pathname);
     }
   }, []);
@@ -1842,6 +1842,7 @@ const App = () => {
                         <textarea
                           value={t.notes}
                           onChange={e => updateTaskNotes(t.id, e.target.value)}
+                          onKeyDown={e => e.stopPropagation()}
                           placeholder="Add notes..."
                           className="w-full text-xs bg-white/60 dark:bg-white/10 rounded-lg px-3 py-2 border border-violet-200 dark:border-violet-700 text-gray-800 dark:text-gray-200 min-h-[60px] resize-none"
                         />
@@ -1863,6 +1864,7 @@ const App = () => {
                             type="text"
                             placeholder="+ tag"
                             onKeyDown={e => {
+                              e.stopPropagation();
                               if (e.key === "Enter" && e.currentTarget.value.trim()) {
                                 addTag(t.id, e.currentTarget.value.trim());
                                 e.currentTarget.value = "";
@@ -1897,6 +1899,7 @@ const App = () => {
                             type="text"
                             placeholder="+ Add subtask"
                             onKeyDown={e => {
+                              e.stopPropagation();
                               if (e.key === "Enter" && e.currentTarget.value.trim()) {
                                 addSubtask(t.id, e.currentTarget.value.trim());
                                 e.currentTarget.value = "";
