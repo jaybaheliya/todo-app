@@ -1849,17 +1849,23 @@ const App = () => {
                   {expandedTask === t.id && (
                     <div className="bg-white/20 dark:bg-black/10 animate-slideIn">
                       {/* tab bar */}
-                      <div className="flex gap-1 px-4 pt-2">
+                      <div className="flex gap-1.5 px-4 pt-3 pb-1 border-b border-white/20 dark:border-white/10">
                         {(["details", "effort"] as const).map(tab => (
                           <button key={tab} onClick={() => setExpandedTab(prev => ({ ...prev, [t.id]: tab }))}
-                            className={`text-xs px-3 py-1 rounded-lg font-semibold capitalize transition-all ${
+                            className={`text-xs px-4 py-1.5 rounded-xl font-semibold transition-all ${
                               (expandedTab[t.id] ?? "details") === tab
-                                ? "bg-violet-500 text-white"
-                                : "text-gray-500 hover:text-violet-500 dark:text-gray-400"
+                                ? "bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-sm shadow-violet-400/30"
+                                : "bg-white/40 dark:bg-white/5 text-gray-500 hover:text-violet-500 dark:text-gray-400 hover:bg-violet-50 dark:hover:bg-violet-900/20"
                             }`}>
                             {tab === "effort" ? "⏱ Effort" : "📋 Details"}
                           </button>
                         ))}
+                        {/* effort quick-stat pill in tab bar */}
+                        {(expandedTab[t.id] ?? "details") === "details" && t.subtasks.some(s => s.effort != null) && (
+                          <span className="ml-auto self-center text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300 font-semibold">
+                            ⏱ {t.subtasks.reduce((a, s) => a + (s.effort ?? 0), 0)}m logged
+                          </span>
+                        )}
                       </div>
 
                       {/* details tab */}
@@ -2004,30 +2010,40 @@ const App = () => {
 
                             {/* per-subtask effort */}
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block">Subtask Efforts</label>
-                              {t.subtasks.length === 0 && (
-                                <p className="text-xs text-gray-400 dark:text-gray-500">No subtasks yet — add them in the Details tab.</p>
-                              )}
-                              {t.subtasks.map(sub => (
-                                <div key={sub.id} className="flex items-center gap-2 bg-white/40 dark:bg-white/5 rounded-lg px-3 py-1.5">
-                                  <span className={`flex-1 text-xs truncate ${
-                                    sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"
-                                  }`}>{sub.text}</span>
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <input
-                                      type="number" min="0" max="999" placeholder="min"
-                                      value={sub.effort ?? ""}
-                                      onKeyDown={e => e.stopPropagation()}
-                                      onChange={e => updateSubtaskEffort(t.id, sub.id, e.target.value ? Number(e.target.value) : null)}
-                                      className="w-16 text-xs bg-white/60 dark:bg-white/10 rounded px-2 py-1 border border-violet-200 dark:border-violet-700 text-center"
-                                    />
-                                    <span className="text-[10px] text-gray-400">min</span>
-                                    {sub.effort != null && sub.effort >= 60 && (
-                                      <span className="text-[10px] text-violet-500 font-medium">{fmt(sub.effort)}</span>
-                                    )}
-                                  </div>
+                              <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block">Subtask Efforts (minutes)</label>
+                              {t.subtasks.length === 0 ? (
+                                <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 bg-white/30 dark:bg-white/5 rounded-lg px-3 py-2">
+                                  <span>No subtasks yet —</span>
+                                  <button onClick={() => setExpandedTab(prev => ({ ...prev, [t.id]: "details" }))}
+                                    className="text-violet-500 underline font-medium">add them in Details</button>
                                 </div>
-                              ))}
+                              ) : (
+                                t.subtasks.map(sub => (
+                                  <div key={sub.id} className="flex items-center gap-2 bg-white/40 dark:bg-white/5 rounded-lg px-3 py-2">
+                                    <span className={`size-1.5 rounded-full shrink-0 ${
+                                      sub.completed ? "bg-gray-300 dark:bg-gray-600" : "bg-violet-400"
+                                    }`} />
+                                    <span className={`flex-1 text-xs truncate ${
+                                      sub.completed ? "line-through text-gray-400" : "text-gray-700 dark:text-gray-300"
+                                    }`}>{sub.text}</span>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <input
+                                        type="number" min="0" max="999" placeholder="0"
+                                        value={sub.effort ?? ""}
+                                        onKeyDown={e => e.stopPropagation()}
+                                        onChange={e => updateSubtaskEffort(t.id, sub.id, e.target.value ? Number(e.target.value) : null)}
+                                        className="w-16 text-xs bg-white/60 dark:bg-white/10 rounded-lg px-2 py-1 border border-violet-200 dark:border-violet-700 text-center font-mono"
+                                      />
+                                      <span className="text-[10px] text-gray-400 w-6">min</span>
+                                      <span className={`text-[10px] font-semibold w-12 text-right ${
+                                        sub.effort != null && sub.effort > 0 ? "text-violet-500" : "text-gray-300 dark:text-gray-600"
+                                      }`}>
+                                        {sub.effort != null && sub.effort > 0 ? fmt(sub.effort) : "—"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
                             </div>
                           </div>
                         );
