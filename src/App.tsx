@@ -886,33 +886,13 @@ const App = () => {
     });
   }, [user]);
 
-  const swRef = useRef<ServiceWorker | null>(null);
-
-  /* request notification permission + register service worker */
+  /* request notification permission once */
   useEffect(() => {
     if ("Notification" in window) {
       notifPermRef.current = Notification.permission;
       if (Notification.permission === "default") {
         Notification.requestPermission().then(p => { notifPermRef.current = p; });
       }
-    }
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").then(reg => {
-        swRef.current = reg.active ?? reg.installing ?? reg.waiting;
-        reg.addEventListener("updatefound", () => {
-          swRef.current = reg.installing;
-        });
-      }).catch(console.error);
-    }
-  }, []);
-
-  const notify = useCallback((body: string, tag: string) => {
-    if (notifPermRef.current !== "granted") return;
-    const sw = swRef.current;
-    if (sw) {
-      sw.postMessage({ type: "SHOW_NOTIFICATION", title: "My Task", body, tag });
-    } else {
-      new Notification("My Task", { body, icon: "/favicon.ico", tag });
     }
   }, []);
 
@@ -925,7 +905,7 @@ const App = () => {
           if (notifiedIds.current.has(t.id)) return { ...t, notified: true };
           notifiedIds.current.add(t.id);
           const msg = `"${t.text}" — time's up! You missed the deadline.`;
-          notify(msg, `overdue-${t.id}`);
+          if (notifPermRef.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `overdue-${t.id}` });
           setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "overdue" }]);
           supabase.from("todos").update({ notified: true }).eq("id", t.id);
           return { ...t, notified: true };
@@ -1061,7 +1041,7 @@ const App = () => {
         const elapsed = t.elapsed + (t.startedAt ? now - t.startedAt : 0);
         updated = { ...t, completed: true, completedAt: now, elapsed, startedAt: null };
         const msg = `"${t.text}" completed in ${formatDuration(elapsed)}!`;
-        notify(msg, `done-${t.id}`);
+        if (notifPermRef.current === "granted") new Notification("My Task", { body: msg, icon: "/favicon.ico", tag: `done-${t.id}` });
         setToasts(ts => [...ts, { id: ++toastCounter.current, text: msg, type: "done" }]);
         const cols = ["#a78bfa","#f472b6","#34d399","#fbbf24","#60a5fa"];
         setConfetti(Array.from({ length: 12 }, (_, i) => ({ id: now + i, x: 20 + Math.random() * 60, color: cols[i % cols.length] })));
