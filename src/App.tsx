@@ -867,7 +867,7 @@ const App = () => {
           notes: String(r.notes ?? ""),
           tags: Array.isArray(r.tags) ? r.tags : [],
           subtasks: Array.isArray(r.subtasks) ? r.subtasks : [],
-          order: Number(r.order) || r.id,
+          order: Number(r.order) || 0,
           canvas: r.canvas ?? null,
           pdf: r.pdf ?? null,
         }));
@@ -964,7 +964,7 @@ const App = () => {
   }, [projects]);
 
   const addTodo = useCallback(async () => {
-    if (!input.trim() || !user) return;
+    if (!input.trim() || !user) return; // guard: never insert without text
     const now = Date.now();
     const tempId = -now; // negative so it never collides with a real DB id
     const dl  = deadline ? new Date(deadline).getTime() : null;
