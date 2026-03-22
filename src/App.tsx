@@ -1454,7 +1454,7 @@ const App = () => {
 
           {/* desktop sidebar */}
           {!isMobile && (
-            <div className={`shrink-0 transition-all duration-300 overflow-hidden ${sidebarOpen ? "w-56" : "w-0"}`}>
+            <div className={`shrink-0 transition-all duration-300 overflow-hidden ${sidebarOpen ? "w-64" : "w-0"}`}>
               <ProjectSidebar
                 projects={projects} selectedId={selectedProject}
                 taskCounts={taskCounts} doneCounts={doneCounts}
